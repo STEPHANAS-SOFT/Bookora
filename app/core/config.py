@@ -95,8 +95,9 @@ class Settings(BaseSettings):
             "client_x509_cert_url": self.FIREBASE_CLIENT_X509_CERT_URL
         }
     
-    # FCM Configuration
-    FCM_SERVER_KEY: str = Field(default="", env="FCM_SERVER_KEY")
+    # FCM Configuration (HTTP v1 API)
+    FCM_SENDER_ID: str = Field(default="", env="FCM_SENDER_ID")
+    FCM_PROJECT_ID: str = Field(default="", env="FCM_PROJECT_ID")  # Usually same as FIREBASE_PROJECT_ID
     
     # Email Configuration (SMTP)
     SMTP_HOST: str = Field(default="smtp.gmail.com", env="SMTP_HOST")

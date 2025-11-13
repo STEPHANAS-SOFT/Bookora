@@ -9,6 +9,9 @@ psycopg2-binary>=2.9.0
 
 # Authentication & Security - simplified 
 firebase-admin>=6.0.0
+google-auth>=2.0.0
+google-auth-oauthlib>=1.0.0
+google-auth-httplib2>=0.2.0
 
 # Configuration
 python-decouple>=3.8

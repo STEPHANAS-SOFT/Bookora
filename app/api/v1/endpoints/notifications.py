@@ -19,6 +19,13 @@ from app.models.notifications import (
 from app.models.clients import Client
 from app.models.businesses import Business
 from app.core.auth import get_current_firebase_user
+from app.services.fcm_service import (
+    send_appointment_notification,
+    send_chat_notification, 
+    send_business_notification,
+    FCMMessage,
+    fcm_service
+)
 
 router = APIRouter()
 
