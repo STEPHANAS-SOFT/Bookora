@@ -38,7 +38,7 @@ app = FastAPI(
     openapi_url="/api/v1/openapi.json",
     docs_url="/docs",
     redoc_url="/redoc",
-    lifespan=lifespan
+    lifespan=lifespan,
     root_path="/bookora"
 )
 

@@ -13,10 +13,9 @@ from google.auth.transport.requests import Request
 from google.oauth2 import service_account
 from pydantic import BaseModel
 
-from app.core.config import get_settings
+from app.core.config import settings
 
 logger = logging.getLogger(__name__)
-settings = get_settings()
 
 
 class FCMMessage(BaseModel):
@@ -42,7 +41,7 @@ class FCMService:
         """Initialize Firebase service account credentials"""
         try:
             # Use Firebase service account credentials for FCM
-            firebase_credentials = settings.firebase_service_account_info
+            firebase_credentials = settings.firebase_credentials
             self.credentials = service_account.Credentials.from_service_account_info(
                 firebase_credentials,
                 scopes=['https://www.googleapis.com/auth/cloud-platform']
