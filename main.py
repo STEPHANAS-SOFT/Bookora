@@ -39,6 +39,7 @@ app = FastAPI(
     docs_url="/docs",
     redoc_url="/redoc",
     lifespan=lifespan
+    root_path="/bookora"
 )
 
 # Get CORS configuration
