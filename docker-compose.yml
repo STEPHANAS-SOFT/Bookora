@@ -1,0 +1,126 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database with PostGIS extension
+  postgres:
+    image: postgis/postgis:15-3.3
+    container_name: bookora_postgres
+    environment:
+      POSTGRES_DB: bookora
+      POSTGRES_USER: bookora_user
+      POSTGRES_PASSWORD: bookora_password
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+    ports:
+      - "5432:5432"
+    networks:
+      - bookora_network
+    restart: unless-stopped
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U bookora_user -d bookora" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Redis for Celery background tasks
+  redis:
+    image: redis:7-alpine
+    container_name: bookora_redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - bookora_network
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: [ "CMD", "redis-cli", "ping" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # pgAdmin for database management
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: bookora_pgadmin
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@bookora.com
+      PGADMIN_DEFAULT_PASSWORD: admin123
+      PGADMIN_CONFIG_SERVER_MODE: 'False'
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+    ports:
+      - "8080:80"
+    networks:
+      - bookora_network
+    restart: unless-stopped
+    depends_on:
+      - postgres
+  # FastAPI Application (uncomment when ready to run in containers)
+  # api:
+  #   build: .
+  #   container_name: bookora_api
+  #   environment:
+  #     DATABASE_URL: postgresql://bookora_user:bookora_password@postgres:5432/bookora
+  #     REDIS_URL: redis://redis:6379/0
+  #   ports:
+  #     - "8000:8000"
+  #   volumes:
+  #     - .:/app
+  #     - ./uploads:/app/uploads
+  #   networks:
+  #     - bookora_network
+  #   depends_on:
+  #     postgres:
+  #       condition: service_healthy
+  #     redis:
+  #       condition: service_healthy
+  #   restart: unless-stopped
+  #   command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+
+  # Celery Worker (uncomment when ready)
+  # celery_worker:
+  #   build: .
+  #   container_name: bookora_celery_worker
+  #   environment:
+  #     DATABASE_URL: postgresql://bookora_user:bookora_password@postgres:5432/bookora
+  #     REDIS_URL: redis://redis:6379/0
+  #   volumes:
+  #     - .:/app
+  #   networks:
+  #     - bookora_network
+  #   depends_on:
+  #     - postgres
+  #     - redis
+  #   restart: unless-stopped
+  #   command: celery -A app.core.celery worker --loglevel=info
+
+  # Celery Beat (scheduler - uncomment when ready)
+  # celery_beat:
+  #   build: .
+  #   container_name: bookora_celery_beat
+  #   environment:
+  #     DATABASE_URL: postgresql://bookora_user:bookora_password@postgres:5432/bookora
+  #     REDIS_URL: redis://redis:6379/0
+  #   volumes:
+  #     - .:/app
+  #   networks:
+  #     - bookora_network
+  #   depends_on:
+  #     - postgres
+  #     - redis
+  #   restart: unless-stopped
+  #   command: celery -A app.core.celery beat --loglevel=info
+
+volumes:
+  postgres_data:
+  redis_data:
+  pgadmin_data:
+
+
+networks:
+  bookora_network:
+    driver: bridge

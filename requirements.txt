@@ -1,0 +1,18 @@
+# FastAPI Core - minimal for now
+fastapi>=0.100.0
+uvicorn>=0.20.0
+python-multipart>=0.0.5
+
+# Database & ORM - simplified
+sqlalchemy>=2.0.0
+psycopg2-binary>=2.9.0
+
+# Authentication & Security - simplified 
+firebase-admin>=6.0.0
+
+# Configuration
+python-decouple>=3.8
+
+# Utilities
+python-dateutil>=2.8.0
+pytz>=2023.3
