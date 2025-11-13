@@ -1,111 +1,69 @@
 """
-Authentication utilities for Firebase integration.
+Authentication utilities for Bookora API.
 
-This module provides authentication functions for validating
-Firebase tokens and extracting user information.
+This module provides simple authentication functions.
+Firebase UID is passed as parameter from frontend, no token validation.
+Only API key authentication is used (handled by middleware).
 """
 
-import firebase_admin
-from firebase_admin import auth, credentials
-from fastapi import HTTPException, Depends
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from app.core.credentials import get_firebase_credentials, is_development
+from fastapi import HTTPException, Query
+from typing import Optional
 import logging
-import json
-import tempfile
 
 logger = logging.getLogger(__name__)
 
-# Initialize Bearer token security
-security = HTTPBearer()
 
-# Initialize Firebase Admin SDK
-def initialize_firebase():
-    """Initialize Firebase Admin SDK with credentials from environment."""
-    if firebase_admin._apps:
-        return  # Already initialized
-    
-    try:
-        firebase_creds = get_firebase_credentials()
-        
-        # Check if we have valid credentials
-        if not firebase_creds.get("project_id") or not firebase_creds.get("private_key"):
-            if is_development():
-                logger.warning("Firebase credentials not configured - authentication will be disabled in development")
-                return
-            else:
-                raise ValueError("Firebase credentials are required in production")
-        
-        # Create credentials object from dictionary
-        cred = credentials.Certificate(firebase_creds)
-        firebase_admin.initialize_app(cred)
-        logger.info("Firebase Admin SDK initialized successfully")
-        
-    except Exception as e:
-        if is_development():
-            logger.warning(f"Firebase initialization failed in development mode: {e}")
-        else:
-            logger.error(f"Error initializing Firebase: {e}")
-            raise
-
-# Initialize Firebase on module import
-initialize_firebase()
-
-
-async def get_current_firebase_user(
-    credentials: HTTPAuthorizationCredentials = Depends(security)
-) -> dict:
+def get_firebase_uid_param(firebase_uid: str = Query(..., description="Firebase UID from frontend authentication")) -> str:
     """
-    Validate Firebase ID token and return user information.
+    Get Firebase UID from query parameter.
     
     Args:
-        credentials: HTTP Bearer credentials containing Firebase ID token
+        firebase_uid: Firebase UID passed from frontend
         
     Returns:
-        dict: Firebase user information
+        str: Firebase UID for database queries
         
     Raises:
-        HTTPException: If token is invalid or expired
+        HTTPException: If firebase_uid is empty or invalid
     """
-    try:
-        # Verify the Firebase ID token
-        decoded_token = auth.verify_id_token(credentials.credentials)
-        return decoded_token
-        
-    except auth.InvalidIdTokenError:
+    if not firebase_uid or not firebase_uid.strip():
         raise HTTPException(
-            status_code=401,
-            detail="Invalid Firebase token",
-            headers={"WWW-Authenticate": "Bearer"}
+            status_code=400,
+            detail="Firebase UID is required"
         )
-    except auth.ExpiredIdTokenError:
-        raise HTTPException(
-            status_code=401,
-            detail="Expired Firebase token",
-            headers={"WWW-Authenticate": "Bearer"}
-        )
-    except Exception as e:
-        logger.error(f"Firebase authentication error: {e}")
-        raise HTTPException(
-            status_code=401,
-            detail="Authentication failed",
-            headers={"WWW-Authenticate": "Bearer"}
-        )
-
-
-async def get_optional_firebase_user(
-    credentials: HTTPAuthorizationCredentials = Depends(security)
-) -> dict:
-    """
-    Optionally validate Firebase token for endpoints that work with/without auth.
     
-    Returns:
-        dict or None: Firebase user information if token is valid, None otherwise
+    if len(firebase_uid.strip()) < 10:  # Basic validation
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid Firebase UID format"
+        )
+    
+    return firebase_uid.strip()
+
+
+def get_optional_firebase_uid_param(firebase_uid: Optional[str] = Query(None, description="Optional Firebase UID")) -> Optional[str]:
     """
-    try:
-        if credentials:
-            decoded_token = auth.verify_id_token(credentials.credentials)
-            return decoded_token
-    except Exception:
-        pass
+    Get optional Firebase UID from query parameter.
+    
+    Args:
+        firebase_uid: Optional Firebase UID passed from frontend
+        
+    Returns:
+        Optional[str]: Firebase UID or None
+    """
+    if firebase_uid and firebase_uid.strip():
+        return firebase_uid.strip()
     return None
+
+
+# For backward compatibility - remove Firebase token validation
+async def get_current_firebase_user() -> dict:
+    """
+    Deprecated: This function is no longer used.
+    Firebase authentication is handled on the frontend.
+    Use firebase_uid parameter instead.
+    """
+    raise HTTPException(
+        status_code=501,
+        detail="Firebase authentication is handled on frontend. Pass firebase_uid as parameter."
+    )

@@ -11,7 +11,7 @@ A comprehensive REST API for multi-tenant appointment booking system built with 
 
 - **Multi-Tenant Architecture**: Separate business and client domains
 - **Real-time Chat**: WebSocket-based messaging between clients and businesses
-- **Firebase Authentication**: Secure authentication using Firebase UID
+- **API Key Authentication**: Secure API access with Firebase UID parameters
 - **Location-Based Services**: PostgreSQL with PostGIS for proximity searches
 - **Push Notifications**: FCM integration for mobile notifications
 - **Email Notifications**: SMTP-based email reminders and notifications
@@ -39,7 +39,7 @@ bookora/
 - **Framework**: FastAPI
 - **Database**: PostgreSQL with PostGIS
 - **ORM**: SQLAlchemy
-- **Authentication**: Firebase Admin SDK
+- **Authentication**: API Key + Firebase UID parameters
 - **Real-time**: WebSockets
 - **Task Queue**: Celery + Redis
 - **Migrations**: Alembic
