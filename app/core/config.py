@@ -114,6 +114,7 @@ class Settings(BaseSettings):
     
     # Timezone Configuration
     DEFAULT_TIMEZONE: str = Field(default="UTC", env="DEFAULT_TIMEZONE")
+    TIMEZONE: str = Field(default="UTC", env="TIMEZONE")  # For Celery
     
     # Business Logic Configuration
     DEFAULT_APPOINTMENT_DURATION: int = 30  # minutes

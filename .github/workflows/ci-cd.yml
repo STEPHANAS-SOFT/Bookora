@@ -1,0 +1,383 @@
+name: Bookora CI/CD Pipeline
+
+# This workflow automates testing, building, and deploying the Bookora backend
+# It runs on push to main/staging branches and on pull requests
+
+on:
+  push:
+    branches: [ main, staging, develop ]
+  pull_request:
+    branches: [ main, staging ]
+  workflow_dispatch:  # Allow manual triggering
+
+env:
+  PYTHON_VERSION: '3.11'
+  POSTGRES_VERSION: '15'
+
+jobs:
+  # ============================================================================
+  # CODE QUALITY AND LINTING
+  # ============================================================================
+  code-quality:
+    name: Code Quality Checks
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+        
+      - name: 🐍 Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+          
+      - name: 📦 Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install flake8 black isort mypy
+          
+      - name: 🔍 Run flake8
+        run: |
+          flake8 app/ --count --select=E9,F63,F7,F82 --show-source --statistics
+          flake8 app/ --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
+          
+      - name: 🎨 Check code formatting with black
+        run: black --check app/
+        continue-on-error: true
+        
+      - name: 📋 Check import order with isort
+        run: isort --check-only app/
+        continue-on-error: true
+
+  # ============================================================================
+  # SECURITY SCANNING
+  # ============================================================================
+  security:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+        
+      - name: 🐍 Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          
+      - name: 🔐 Run security checks with bandit
+        run: |
+          pip install bandit
+          bandit -r app/ -f json -o bandit-report.json || true
+        continue-on-error: true
+        
+      - name: 📊 Upload security report
+        uses: actions/upload-artifact@v3
+        if: always()
+        with:
+          name: security-report
+          path: bandit-report.json
+
+  # ============================================================================
+  # UNIT AND INTEGRATION TESTS
+  # ============================================================================
+  test:
+    name: Run Tests
+    runs-on: ubuntu-latest
+    
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: bookora_user
+          POSTGRES_PASSWORD: bookora_password
+          POSTGRES_DB: bookora_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+          
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+        
+      - name: 🐍 Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+          
+      - name: 📦 Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest pytest-cov pytest-asyncio httpx
+          
+      - name: 🔧 Set up environment variables
+        run: |
+          cp env.template .env
+          echo "DATABASE_URL=postgresql://bookora_user:bookora_password@localhost:5432/bookora_test" >> .env
+          echo "REDIS_URL=redis://localhost:6379/0" >> .env
+          echo "SECRET_KEY=test-secret-key-for-ci-cd-pipeline-only" >> .env
+          echo "API_KEY=test-api-key-for-ci-cd" >> .env
+          echo "TESTING=True" >> .env
+          
+      - name: 🗄️ Run database migrations
+        run: |
+          alembic upgrade head
+        env:
+          DATABASE_URL: postgresql://bookora_user:bookora_password@localhost:5432/bookora_test
+          
+      - name: 🧪 Run tests with coverage
+        run: |
+          pytest tests/ -v --cov=app --cov-report=xml --cov-report=html --cov-report=term
+        env:
+          DATABASE_URL: postgresql://bookora_user:bookora_password@localhost:5432/bookora_test
+          REDIS_URL: redis://localhost:6379/0
+          
+      - name: 📊 Upload coverage reports
+        uses: codecov/codecov-action@v3
+        with:
+          file: ./coverage.xml
+          flags: unittests
+          name: codecov-umbrella
+          fail_ci_if_error: false
+          
+      - name: 📈 Upload coverage artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: coverage-report
+          path: htmlcov/
+
+  # ============================================================================
+  # API ENDPOINT TESTS
+  # ============================================================================
+  api-tests:
+    name: API Endpoint Tests
+    runs-on: ubuntu-latest
+    needs: [test]
+    
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: bookora_user
+          POSTGRES_PASSWORD: bookora_password
+          POSTGRES_DB: bookora_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+          
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+    
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+        
+      - name: 🐍 Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+          
+      - name: 📦 Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install httpx pytest pytest-asyncio
+          
+      - name: 🔧 Set up environment
+        run: |
+          cp env.template .env
+          echo "DATABASE_URL=postgresql://bookora_user:bookora_password@localhost:5432/bookora_test" >> .env
+          echo "REDIS_URL=redis://localhost:6379/0" >> .env
+          echo "SECRET_KEY=test-secret-key" >> .env
+          echo "API_KEY=test-api-key" >> .env
+          
+      - name: 🗄️ Run migrations
+        run: alembic upgrade head
+        env:
+          DATABASE_URL: postgresql://bookora_user:bookora_password@localhost:5432/bookora_test
+          
+      - name: 🚀 Start API server
+        run: |
+          uvicorn app.main:app --host 0.0.0.0 --port 8000 &
+          sleep 5
+        env:
+          DATABASE_URL: postgresql://bookora_user:bookora_password@localhost:5432/bookora_test
+          REDIS_URL: redis://localhost:6379/0
+          
+      - name: 🧪 Test API endpoints
+        run: |
+          curl -f http://localhost:8000/health || exit 1
+          curl -f http://localhost:8000/docs || exit 1
+
+  # ============================================================================
+  # BUILD DOCKER IMAGE
+  # ============================================================================
+  build:
+    name: Build Docker Image
+    runs-on: ubuntu-latest
+    needs: [code-quality, test]
+    if: github.event_name == 'push'
+    
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+        
+      - name: 🐳 Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+        
+      - name: 🔑 Log in to Docker Hub
+        uses: docker/login-action@v3
+        if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/staging'
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+          
+      - name: 🏗️ Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/staging' }}
+          tags: |
+            ${{ secrets.DOCKER_USERNAME }}/bookora:latest
+            ${{ secrets.DOCKER_USERNAME }}/bookora:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # ============================================================================
+  # DEPLOY TO STAGING
+  # ============================================================================
+  deploy-staging:
+    name: Deploy to Staging
+    runs-on: ubuntu-latest
+    needs: [build, api-tests]
+    if: github.ref == 'refs/heads/staging' && github.event_name == 'push'
+    environment:
+      name: staging
+      url: https://staging.bookora.com
+    
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+        
+      - name: 🚀 Deploy to staging server
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.STAGING_HOST }}
+          username: ${{ secrets.STAGING_USER }}
+          key: ${{ secrets.STAGING_SSH_KEY }}
+          script: |
+            cd /var/www/bookora
+            git pull origin staging
+            ./deploy.sh --env staging --force
+            
+      - name: 🏥 Health check
+        run: |
+          sleep 10
+          curl -f https://staging.bookora.com/health || exit 1
+
+  # ============================================================================
+  # DEPLOY TO PRODUCTION
+  # ============================================================================
+  deploy-production:
+    name: Deploy to Production
+    runs-on: ubuntu-latest
+    needs: [build, api-tests]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    environment:
+      name: production
+      url: https://bookora.com
+    
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+        
+      - name: 🚀 Deploy to production server
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.PRODUCTION_HOST }}
+          username: ${{ secrets.PRODUCTION_USER }}
+          key: ${{ secrets.PRODUCTION_SSH_KEY }}
+          script: |
+            cd /var/www/bookora
+            git pull origin main
+            ./deploy.sh --env production --force
+            
+      - name: 🏥 Health check
+        run: |
+          sleep 10
+          curl -f https://bookora.com/health || exit 1
+          
+      - name: 📧 Send deployment notification
+        if: success()
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: ${{ secrets.SMTP_HOST }}
+          server_port: ${{ secrets.SMTP_PORT }}
+          username: ${{ secrets.SMTP_USERNAME }}
+          password: ${{ secrets.SMTP_PASSWORD }}
+          subject: "✅ Bookora Production Deployment Successful"
+          body: |
+            Production deployment completed successfully!
+            
+            Commit: ${{ github.sha }}
+            Branch: ${{ github.ref }}
+            Author: ${{ github.actor }}
+            Time: ${{ github.event.head_commit.timestamp }}
+          to: ${{ secrets.ADMIN_EMAIL }}
+          from: ${{ secrets.FROM_EMAIL }}
+
+  # ============================================================================
+  # NOTIFICATION ON FAILURE
+  # ============================================================================
+  notify-failure:
+    name: Notify on Failure
+    runs-on: ubuntu-latest
+    needs: [code-quality, test, api-tests]
+    if: failure()
+    
+    steps:
+      - name: 📧 Send failure notification
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: ${{ secrets.SMTP_HOST }}
+          server_port: ${{ secrets.SMTP_PORT }}
+          username: ${{ secrets.SMTP_USERNAME }}
+          password: ${{ secrets.SMTP_PASSWORD }}
+          subject: "❌ Bookora CI/CD Pipeline Failed"
+          body: |
+            CI/CD pipeline failed for Bookora backend!
+            
+            Workflow: ${{ github.workflow }}
+            Branch: ${{ github.ref }}
+            Commit: ${{ github.sha }}
+            Author: ${{ github.actor }}
+            
+            Check the details: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          to: ${{ secrets.ADMIN_EMAIL }}
+          from: ${{ secrets.FROM_EMAIL }}
+        continue-on-error: true
+

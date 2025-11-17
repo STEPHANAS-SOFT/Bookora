@@ -2,6 +2,8 @@
 Appointment API endpoints for the Bookora application.
 
 This module handles appointment booking, management, and scheduling.
+Authentication is handled by API key middleware.
+Firebase UID is passed as parameter from frontend.
 """
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Path
@@ -19,20 +21,18 @@ from app.schemas.appointments import (
     AppointmentCreate, AppointmentUpdate, AppointmentResponse,
     AppointmentListResponse, AppointmentReschedule
 )
-from app.core.auth import get_current_firebase_user
 
 router = APIRouter()
 
 @router.post("/book", response_model=AppointmentResponse)
 async def book_appointment(
     appointment_data: AppointmentCreate,
-    current_user: dict = Depends(get_current_firebase_user),
+    firebase_uid: str = Query(..., description="Client Firebase UID from frontend"),
     db: Session = Depends(get_db)
-
 ):
     """Book a new appointment."""
     # Get client
-    client = db.query(Client).filter(Client.firebase_uid == current_user["uid"]).first()
+    client = db.query(Client).filter(Client.firebase_uid == firebase_uid).first()
     if not client:
         raise HTTPException(status_code=404, detail="Client profile not found")
     
@@ -55,18 +55,18 @@ async def book_appointment(
             or_(
                 and_(
                     Appointment.appointment_date <= appointment_data.appointment_date,
-                    func.datetime(Appointment.appointment_date, f"+{Appointment.duration_minutes} minutes") > appointment_data.appointment_date
+                    Appointment.appointment_date + timedelta(minutes=Appointment.duration_minutes) > appointment_data.appointment_date
                 ),
                 and_(
                     Appointment.appointment_date < appointment_end,
-                    func.datetime(Appointment.appointment_date, f"+{Appointment.duration_minutes} minutes") >= appointment_end
+                    Appointment.appointment_date >= appointment_data.appointment_date
                 )
             )
         )
     ).first()
     
     if conflicts:
-        raise HTTPException(status_code=400, detail="Time slot not available")
+        raise HTTPException(status_code=409, detail="Time slot is already booked")
     
     # Create appointment
     appointment = Appointment(
@@ -76,10 +76,12 @@ async def book_appointment(
         appointment_date=appointment_data.appointment_date,
         duration_minutes=service.duration_minutes,
         service_price=service.price,
-        client_notes=appointment_data.client_notes,
-        client_phone_override=appointment_data.client_phone_override
+        total_amount=service.price,
+        client_notes=appointment_data.notes if hasattr(appointment_data, 'notes') else None,
+        status=AppointmentStatus.PENDING
     )
     
+    # Generate confirmation code
     appointment.generate_confirmation_code()
     
     db.add(appointment)
@@ -88,49 +90,71 @@ async def book_appointment(
     
     return appointment
 
-@router.get("/my-appointments", response_model=List[AppointmentResponse])
+
+@router.get("/my-appointments", response_model=AppointmentListResponse)
 async def get_my_appointments(
-    status: Optional[AppointmentStatus] = Query(None),
-    upcoming_only: bool = Query(False),
-    current_user: dict = Depends(get_current_firebase_user),
+    firebase_uid: str = Query(..., description="Firebase UID from frontend"),
+    status: Optional[AppointmentStatus] = Query(None, description="Filter by status"),
+    skip: int = Query(0, ge=0),
+    limit: int = Query(20, ge=1, le=100),
     db: Session = Depends(get_db)
 ):
-    """Get appointments for current user (client or business)."""
-    # Check if user is client or business
-    client = db.query(Client).filter(Client.firebase_uid == current_user["uid"]).first()
-    business = db.query(Business).filter(Business.firebase_uid == current_user["uid"]).first()
+    """Get appointments for the current user (client or business)."""
+    
+    # Check if user is a client
+    client = db.query(Client).filter(Client.firebase_uid == firebase_uid).first()
+    
+    # Check if user is a business
+    business = db.query(Business).filter(Business.firebase_uid == firebase_uid).first()
+    
+    if not client and not business:
+        raise HTTPException(status_code=404, detail="User profile not found")
+    
+    # Build query
+    query = db.query(Appointment)
     
     if client:
-        query = db.query(Appointment).filter(Appointment.client_id == client.id)
-    elif business:
-        query = db.query(Appointment).filter(Appointment.business_id == business.id)
+        query = query.filter(Appointment.client_id == client.id)
     else:
-        raise HTTPException(status_code=404, detail="User profile not found")
+        query = query.filter(Appointment.business_id == business.id)
     
     if status:
         query = query.filter(Appointment.status == status)
     
-    if upcoming_only:
-        query = query.filter(Appointment.appointment_date > datetime.now())
+    # Get total count
+    total = query.count()
     
-    appointments = query.order_by(Appointment.appointment_date.desc()).all()
-    return appointments
+    # Apply pagination and ordering
+    appointments = (
+        query.order_by(Appointment.appointment_date.desc())
+        .offset(skip)
+        .limit(limit)
+        .all()
+    )
+    
+    return AppointmentListResponse(
+        appointments=appointments,
+        total=total,
+        skip=skip,
+        limit=limit
+    )
 
 
 @router.get("/{appointment_id}", response_model=AppointmentResponse)
 async def get_appointment(
-    appointment_id: uuid.UUID,
-    current_user: dict = Depends(get_current_firebase_user),
+    appointment_id: uuid.UUID = Path(..., description="Appointment ID"),
+    firebase_uid: str = Query(..., description="Firebase UID from frontend"),
     db: Session = Depends(get_db)
 ):
-    """Get specific appointment details."""
+    """Get a specific appointment by ID."""
+    
     appointment = db.query(Appointment).filter(Appointment.id == appointment_id).first()
     if not appointment:
         raise HTTPException(status_code=404, detail="Appointment not found")
     
     # Check if user has access to this appointment
-    client = db.query(Client).filter(Client.firebase_uid == current_user["uid"]).first()
-    business = db.query(Business).filter(Business.firebase_uid == current_user["uid"]).first()
+    client = db.query(Client).filter(Client.firebase_uid == firebase_uid).first()
+    business = db.query(Business).filter(Business.firebase_uid == firebase_uid).first()
     
     has_access = False
     if client and appointment.client_id == client.id:
@@ -139,32 +163,43 @@ async def get_appointment(
         has_access = True
     
     if not has_access:
-        raise HTTPException(status_code=403, detail="Access denied to this appointment")
+        raise HTTPException(status_code=403, detail="Access denied")
     
     return appointment
 
 
-@router.put("/{appointment_id}/confirm", response_model=AppointmentResponse)
-async def confirm_appointment(
+@router.put("/{appointment_id}/status", response_model=AppointmentResponse)
+async def update_appointment_status(
     appointment_id: uuid.UUID,
-    current_user: dict = Depends(get_current_firebase_user),
+    status: AppointmentStatus,
+    firebase_uid: str = Query(..., description="Firebase UID from frontend"),
     db: Session = Depends(get_db)
 ):
-    """Confirm an appointment (business only)."""
+    """Update appointment status (business owners and clients can modify)."""
+    
     appointment = db.query(Appointment).filter(Appointment.id == appointment_id).first()
     if not appointment:
         raise HTTPException(status_code=404, detail="Appointment not found")
     
-    # Only business can confirm appointments
-    business = db.query(Business).filter(Business.firebase_uid == current_user["uid"]).first()
-    if not business or appointment.business_id != business.id:
-        raise HTTPException(status_code=403, detail="Only the business can confirm appointments")
+    # Check if user has access to modify this appointment
+    client = db.query(Client).filter(Client.firebase_uid == firebase_uid).first()
+    business = db.query(Business).filter(Business.firebase_uid == firebase_uid).first()
     
-    if appointment.status != AppointmentStatus.PENDING:
-        raise HTTPException(status_code=400, detail="Only pending appointments can be confirmed")
+    has_access = False
+    if client and appointment.client_id == client.id:
+        # Clients can only cancel appointments
+        if status not in [AppointmentStatus.CANCELLED]:
+            raise HTTPException(status_code=403, detail="Clients can only cancel appointments")
+        has_access = True
+    elif business and appointment.business_id == business.id:
+        # Businesses can modify any status
+        has_access = True
     
-    appointment.status = AppointmentStatus.CONFIRMED
-    appointment.confirmed_at = datetime.now()
+    if not has_access:
+        raise HTTPException(status_code=403, detail="Access denied")
+    
+    appointment.status = status
+    appointment.updated_at = datetime.utcnow()
     
     db.commit()
     db.refresh(appointment)
@@ -172,68 +207,59 @@ async def confirm_appointment(
     return appointment
 
 
-@router.put("/{appointment_id}/cancel", response_model=AppointmentResponse) 
-async def cancel_appointment(
+@router.put("/{appointment_id}/reschedule", response_model=AppointmentResponse)
+async def reschedule_appointment(
     appointment_id: uuid.UUID,
-    cancellation_reason: Optional[str] = Query(None, max_length=500),
-    current_user: dict = Depends(get_current_firebase_user),
+    reschedule_data: AppointmentReschedule,
+    firebase_uid: str = Query(..., description="Firebase UID from frontend"),
     db: Session = Depends(get_db)
 ):
-    """Cancel an appointment."""
+    """Reschedule an appointment."""
+    
     appointment = db.query(Appointment).filter(Appointment.id == appointment_id).first()
     if not appointment:
         raise HTTPException(status_code=404, detail="Appointment not found")
     
-    # Check if user has access to this appointment
-    client = db.query(Client).filter(Client.firebase_uid == current_user["uid"]).first()
-    business = db.query(Business).filter(Business.firebase_uid == current_user["uid"]).first()
+    # Check if user has access
+    client = db.query(Client).filter(Client.firebase_uid == firebase_uid).first()
+    business = db.query(Business).filter(Business.firebase_uid == firebase_uid).first()
     
     has_access = False
     if client and appointment.client_id == client.id:
         has_access = True
-        appointment.cancelled_by_client = True
     elif business and appointment.business_id == business.id:
         has_access = True
-        appointment.cancelled_by_business = True
     
     if not has_access:
-        raise HTTPException(status_code=403, detail="Access denied to this appointment")
+        raise HTTPException(status_code=403, detail="Access denied")
     
-    if appointment.status in [AppointmentStatus.COMPLETED, AppointmentStatus.CANCELLED]:
-        raise HTTPException(status_code=400, detail="Cannot cancel completed or already cancelled appointment")
+    # Check for conflicts with new time
+    appointment_end = reschedule_data.new_date + timedelta(minutes=appointment.duration_minutes)
     
-    appointment.status = AppointmentStatus.CANCELLED
-    appointment.cancelled_at = datetime.now()
-    if cancellation_reason:
-        appointment.cancellation_reason = cancellation_reason
+    conflicts = db.query(Appointment).filter(
+        and_(
+            Appointment.business_id == appointment.business_id,
+            Appointment.id != appointment.id,
+            Appointment.status.in_([AppointmentStatus.CONFIRMED, AppointmentStatus.PENDING]),
+            or_(
+                and_(
+                    Appointment.appointment_date <= reschedule_data.new_date,
+                    Appointment.appointment_date + timedelta(minutes=Appointment.duration_minutes) > reschedule_data.new_date
+                ),
+                and_(
+                    Appointment.appointment_date < appointment_end,
+                    Appointment.appointment_date >= reschedule_data.new_date
+                )
+            )
+        )
+    ).first()
     
-    db.commit()
-    db.refresh(appointment)
+    if conflicts:
+        raise HTTPException(status_code=409, detail="New time slot is already booked")
     
-    return appointment
-
-
-@router.put("/{appointment_id}/complete", response_model=AppointmentResponse)
-async def complete_appointment(
-    appointment_id: uuid.UUID,
-    current_user: dict = Depends(get_current_firebase_user),
-    db: Session = Depends(get_db)
-):
-    """Mark an appointment as completed (business only)."""
-    appointment = db.query(Appointment).filter(Appointment.id == appointment_id).first()
-    if not appointment:
-        raise HTTPException(status_code=404, detail="Appointment not found")
-    
-    # Only business can complete appointments
-    business = db.query(Business).filter(Business.firebase_uid == current_user["uid"]).first()
-    if not business or appointment.business_id != business.id:
-        raise HTTPException(status_code=403, detail="Only the business can complete appointments")
-    
-    if appointment.status != AppointmentStatus.CONFIRMED:
-        raise HTTPException(status_code=400, detail="Only confirmed appointments can be completed")
-    
-    appointment.status = AppointmentStatus.COMPLETED
-    appointment.completed_at = datetime.now()
+    # Update appointment
+    appointment.appointment_date = reschedule_data.new_date
+    appointment.updated_at = datetime.utcnow()
     
     db.commit()
     db.refresh(appointment)
@@ -241,143 +267,26 @@ async def complete_appointment(
     return appointment
 
 
-@router.get("/business/{business_id}/available-slots")
-async def get_available_slots(
-    business_id: uuid.UUID,
-    service_id: uuid.UUID,
-    date: str = Query(..., description="Date in YYYY-MM-DD format"),
-    current_user: dict = Depends(get_current_firebase_user),
+# Business-specific appointment endpoints
+@router.get("/business/calendar", response_model=List[AppointmentResponse])
+async def get_business_calendar(
+    firebase_uid: str = Query(..., description="Business Firebase UID from frontend"),
+    start_date: datetime = Query(..., description="Start date for calendar"),
+    end_date: datetime = Query(..., description="End date for calendar"),
     db: Session = Depends(get_db)
 ):
-    """Get available time slots for a specific business service on a given date."""
-    from datetime import datetime, timedelta
+    """Get business calendar with all appointments in date range."""
     
-    try:
-        target_date = datetime.strptime(date, "%Y-%m-%d").date()
-    except ValueError:
-        raise HTTPException(status_code=400, detail="Invalid date format. Use YYYY-MM-DD")
-    
-    # Verify business and service exist
-    business = db.query(Business).filter(Business.id == business_id).first()
+    business = db.query(Business).filter(Business.firebase_uid == firebase_uid).first()
     if not business:
         raise HTTPException(status_code=404, detail="Business not found")
     
-    from app.models.businesses import Service
-    service = (
-        db.query(Service)
-        .filter(Service.id == service_id, Service.business_id == business_id)
-        .first()
-    )
-    if not service:
-        raise HTTPException(status_code=404, detail="Service not found")
-    
-    # Get business hours for the target date day
-    from app.models.businesses import BusinessHours
-    weekday = target_date.weekday()  # 0=Monday, 6=Sunday
-    business_hours = (
-        db.query(BusinessHours)
-        .filter(
-            BusinessHours.business_id == business_id,
-            BusinessHours.day_of_week == weekday,
-            BusinessHours.is_open == True
+    appointments = db.query(Appointment).filter(
+        and_(
+            Appointment.business_id == business.id,
+            Appointment.appointment_date >= start_date,
+            Appointment.appointment_date <= end_date
         )
-        .first()
-    )
+    ).order_by(Appointment.appointment_date).all()
     
-    if not business_hours:
-        return {"available_slots": [], "message": "Business is closed on this date"}
-    
-    # Get existing appointments for the date
-    existing_appointments = (
-        db.query(Appointment)
-        .filter(
-            Appointment.business_id == business_id,
-            Appointment.appointment_date.cast(db.query(func.date).subquery()) == target_date,
-            Appointment.status.in_([AppointmentStatus.PENDING, AppointmentStatus.CONFIRMED])
-        )
-        .all()
-    )
-    
-    # Generate available time slots
-    available_slots = []
-    current_time = datetime.combine(target_date, business_hours.open_time)
-    end_time = datetime.combine(target_date, business_hours.close_time)
-    
-    while current_time + timedelta(minutes=service.duration_minutes) <= end_time:
-        # Check if this slot conflicts with existing appointments
-        slot_end = current_time + timedelta(minutes=service.duration_minutes)
-        is_available = True
-        
-        for appointment in existing_appointments:
-            appt_start = appointment.appointment_date
-            appt_end = appt_start + timedelta(minutes=appointment.service_duration or service.duration_minutes)
-            
-            # Check for overlap
-            if (current_time < appt_end and slot_end > appt_start):
-                is_available = False
-                break
-        
-        if is_available:
-            available_slots.append({
-                "start_time": current_time.strftime("%H:%M"),
-                "end_time": slot_end.strftime("%H:%M"),
-                "datetime": current_time.isoformat()
-            })
-        
-        # Move to next slot (15-minute intervals)
-        current_time += timedelta(minutes=15)
-    
-    return {
-        "date": date,
-        "business_name": business.name,
-        "service_name": service.name,
-        "service_duration": service.duration_minutes,
-        "available_slots": available_slots
-    }
-
-
-@router.put("/{appointment_id}/review", response_model=AppointmentResponse)
-async def add_review_rating(
-    appointment_id: uuid.UUID,
-    review_data: dict,
-    current_user: dict = Depends(get_current_firebase_user),
-    db: Session = Depends(get_db)
-):
-    """Add review and rating to completed appointment."""
-    appointment = db.query(Appointment).filter(Appointment.id == appointment_id).first()
-    if not appointment:
-        raise HTTPException(status_code=404, detail="Appointment not found")
-    
-    if appointment.status != AppointmentStatus.COMPLETED:
-        raise HTTPException(status_code=400, detail="Can only review completed appointments")
-    
-    # Check if user has access to this appointment
-    client = db.query(Client).filter(Client.firebase_uid == current_user["uid"]).first()
-    business = db.query(Business).filter(Business.firebase_uid == current_user["uid"]).first()
-    
-    rating = review_data.get("rating")
-    review_text = review_data.get("review", "")
-    
-    # Validate rating
-    if rating is not None and (rating < 1 or rating > 5):
-        raise HTTPException(status_code=400, detail="Rating must be between 1 and 5")
-    
-    if client and appointment.client_id == client.id:
-        # Client reviewing business
-        if appointment.client_rating is not None:
-            raise HTTPException(status_code=400, detail="You have already reviewed this appointment")
-        appointment.client_rating = rating
-        appointment.client_review = review_text
-    elif business and appointment.business_id == business.id:
-        # Business reviewing client
-        if appointment.business_rating is not None:
-            raise HTTPException(status_code=400, detail="You have already reviewed this appointment")
-        appointment.business_rating = rating
-        appointment.business_review = review_text
-    else:
-        raise HTTPException(status_code=403, detail="Access denied to this appointment")
-    
-    db.commit()
-    db.refresh(appointment)
-    
-    return appointment
+    return appointments

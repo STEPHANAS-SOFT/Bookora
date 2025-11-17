@@ -1,312 +1,309 @@
 """
 Notification API endpoints for the Bookora application.
 
-This module handles notification management, preferences, and delivery status.
+This module handles notification logs, preferences, and FCM token management.
+
+Authentication is handled by API key middleware.
+Firebase UID is passed as parameter from frontend.
 """
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Path
 from sqlalchemy.orm import Session
-from sqlalchemy.sql import func
+from sqlalchemy import desc, and_
 from typing import List, Optional
 from datetime import datetime, timedelta
 import uuid
 
 from app.core.database import get_db
 from app.models.notifications import (
-    NotificationLog, NotificationTemplate, NotificationPreference,
+    NotificationLog, NotificationPreference,
     NotificationType, NotificationEvent, NotificationStatus
 )
 from app.models.clients import Client
 from app.models.businesses import Business
-from app.core.auth import get_current_firebase_user
-from app.services.fcm_service import (
-    send_appointment_notification,
-    send_chat_notification, 
-    send_business_notification,
-    FCMMessage,
-    fcm_service
+from app.schemas.notifications import (
+    NotificationResponse, 
+    NotificationListResponse,
+    NotificationPreferenceResponse,
+    NotificationPreferenceUpdate
 )
 
 router = APIRouter()
 
 
-@router.get("/my-notifications", response_model=List[dict])
-async def get_my_notifications(
-    notification_type: Optional[NotificationType] = Query(None),
-    status: Optional[NotificationStatus] = Query(None),
-    limit: int = Query(50, ge=1, le=100),
+@router.get("/", response_model=NotificationListResponse)
+async def get_notifications(
+    firebase_uid: str = Query(..., description="User Firebase UID from frontend"),
+    status: Optional[NotificationStatus] = Query(None, description="Filter by status"),
+    notification_type: Optional[NotificationType] = Query(None, description="Filter by type"),
     skip: int = Query(0, ge=0),
-    current_user: dict = Depends(get_current_firebase_user),
+    limit: int = Query(20, ge=1, le=100),
     db: Session = Depends(get_db)
 ):
-    """Get notification history for current user."""
-    # Get user ID (client or business)
-    client = db.query(Client).filter(Client.firebase_uid == current_user["uid"]).first()
-    business = db.query(Business).filter(Business.firebase_uid == current_user["uid"]).first()
+    """
+    Get notification history for current user.
     
-    if client:
-        query = db.query(NotificationLog).filter(NotificationLog.client_id == client.id)
-    elif business:
-        query = db.query(NotificationLog).filter(NotificationLog.business_id == business.id)
-    else:
+    Returns paginated list of notifications sent to the user.
+    """
+    # Verify user exists
+    client = db.query(Client).filter(Client.firebase_uid == firebase_uid).first()
+    business = db.query(Business).filter(Business.firebase_uid == firebase_uid).first()
+    
+    if not client and not business:
         raise HTTPException(status_code=404, detail="User profile not found")
     
+    # Build query
+    query = db.query(NotificationLog).filter(
+        NotificationLog.recipient_firebase_uid == firebase_uid
+    )
+    
     # Apply filters
-    if notification_type:
-        query = query.filter(NotificationLog.notification_type == notification_type)
     if status:
         query = query.filter(NotificationLog.status == status)
     
-    # Get notifications
+    if notification_type:
+        query = query.filter(NotificationLog.notification_type == notification_type)
+    
+    # Get total count
+    total = query.count()
+    
+    # Apply pagination and ordering
     notifications = (
-        query.order_by(NotificationLog.created_at.desc())
+        query.order_by(desc(NotificationLog.created_at))
         .offset(skip)
         .limit(limit)
         .all()
     )
     
-    # Format response
-    result = []
-    for notification in notifications:
-        result.append({
-            "id": str(notification.id),
-            "notification_type": notification.notification_type,
-            "event": notification.event,
-            "title": notification.title,
-            "message": notification.message,
-            "status": notification.status,
-            "sent_at": notification.sent_at,
-            "delivered_at": notification.delivered_at,
-            "error_message": notification.error_message,
-            "created_at": notification.created_at
-        })
-    
-    return result
+    return NotificationListResponse(
+        notifications=notifications,
+        total=total,
+        skip=skip,
+        limit=limit
+    )
 
 
-@router.get("/preferences", response_model=dict)
+@router.get("/preferences", response_model=List[NotificationPreferenceResponse])
 async def get_notification_preferences(
-    current_user: dict = Depends(get_current_firebase_user),
+    firebase_uid: str = Query(..., description="User Firebase UID from frontend"),
     db: Session = Depends(get_db)
 ):
-    """Get notification preferences for current user."""
-    # Get user ID (client or business)
-    client = db.query(Client).filter(Client.firebase_uid == current_user["uid"]).first()
-    business = db.query(Business).filter(Business.firebase_uid == current_user["uid"]).first()
+    """
+    Get notification preferences for current user.
     
+    Returns all notification preference settings for the user.
+    """
+    # Verify user exists and get their ID
+    client = db.query(Client).filter(Client.firebase_uid == firebase_uid).first()
+    business = db.query(Business).filter(Business.firebase_uid == firebase_uid).first()
+    
+    if not client and not business:
+        raise HTTPException(status_code=404, detail="User profile not found")
+    
+    # Get preferences
     if client:
         preferences = db.query(NotificationPreference).filter(
             NotificationPreference.client_id == client.id
         ).all()
-        user_id = client.id
-        user_type = "client"
-    elif business:
+    else:
         preferences = db.query(NotificationPreference).filter(
             NotificationPreference.business_id == business.id
         ).all()
-        user_id = business.id
-        user_type = "business"
-    else:
-        raise HTTPException(status_code=404, detail="User profile not found")
     
-    # Convert to dictionary format
-    prefs_dict = {}
-    for pref in preferences:
-        event_key = f"{pref.event}_{pref.notification_type}"
-        prefs_dict[event_key] = pref.is_enabled
-    
-    return {
-        "user_id": str(user_id),
-        "user_type": user_type,
-        "preferences": prefs_dict
-    }
+    return preferences
 
 
-@router.put("/preferences", response_model=dict)
-async def update_notification_preferences(
-    preferences: dict,
-    current_user: dict = Depends(get_current_firebase_user),
+@router.put("/preferences/{event}")
+async def update_notification_preference(
+    event: NotificationEvent,
+    preference_update: NotificationPreferenceUpdate,
+    firebase_uid: str = Query(..., description="User Firebase UID from frontend"),
     db: Session = Depends(get_db)
 ):
-    """Update notification preferences for current user."""
-    # Get user ID (client or business)
-    client = db.query(Client).filter(Client.firebase_uid == current_user["uid"]).first()
-    business = db.query(Business).filter(Business.firebase_uid == current_user["uid"]).first()
+    """
+    Update notification preference for a specific event.
     
-    if client:
-        user_id = client.id
-        user_type = "client"
-    elif business:
-        user_id = business.id
-        user_type = "business"
-    else:
+    Allows users to enable/disable notifications for specific events.
+    """
+    # Verify user exists and get their ID
+    client = db.query(Client).filter(Client.firebase_uid == firebase_uid).first()
+    business = db.query(Business).filter(Business.firebase_uid == firebase_uid).first()
+    
+    if not client and not business:
         raise HTTPException(status_code=404, detail="User profile not found")
     
-    # Update preferences
-    updated_count = 0
-    for pref_key, is_enabled in preferences.items():
-        try:
-            # Parse event and notification type from key (e.g., "appointment_booked_email")
-            parts = pref_key.rsplit('_', 1)
-            if len(parts) != 2:
-                continue
-                
-            event_str, notif_type_str = parts
-            
-            # Validate enums
-            try:
-                event = NotificationEvent(event_str)
-                notif_type = NotificationType(notif_type_str)
-            except ValueError:
-                continue
-            
-            # Find or create preference
-            if client:
-                pref = (
-                    db.query(NotificationPreference)
-                    .filter(
-                        NotificationPreference.client_id == user_id,
-                        NotificationPreference.event == event,
-                        NotificationPreference.notification_type == notif_type
-                    )
-                    .first()
-                )
-            else:
-                pref = (
-                    db.query(NotificationPreference)
-                    .filter(
-                        NotificationPreference.business_id == user_id,
-                        NotificationPreference.event == event,
-                        NotificationPreference.notification_type == notif_type
-                    )
-                    .first()
-                )
-            
-            if pref:
-                pref.is_enabled = bool(is_enabled)
-                updated_count += 1
-            else:
-                # Create new preference
-                new_pref = NotificationPreference(
-                    client_id=user_id if client else None,
-                    business_id=user_id if business else None,
-                    event=event,
-                    notification_type=notif_type,
-                    is_enabled=bool(is_enabled)
-                )
-                db.add(new_pref)
-                updated_count += 1
-                
-        except Exception as e:
-            continue
+    # Find or create preference
+    if client:
+        preference = db.query(NotificationPreference).filter(
+            NotificationPreference.client_id == client.id,
+            NotificationPreference.event == event,
+            NotificationPreference.notification_type == preference_update.notification_type
+        ).first()
+        
+        if not preference:
+            preference = NotificationPreference(
+                client_id=client.id,
+                event=event,
+                notification_type=preference_update.notification_type,
+                is_enabled=preference_update.is_enabled
+            )
+            db.add(preference)
+        else:
+            preference.is_enabled = preference_update.is_enabled
+    else:
+        preference = db.query(NotificationPreference).filter(
+            NotificationPreference.business_id == business.id,
+            NotificationPreference.event == event,
+            NotificationPreference.notification_type == preference_update.notification_type
+        ).first()
+        
+        if not preference:
+            preference = NotificationPreference(
+                business_id=business.id,
+                event=event,
+                notification_type=preference_update.notification_type,
+                is_enabled=preference_update.is_enabled
+            )
+            db.add(preference)
+        else:
+            preference.is_enabled = preference_update.is_enabled
     
     db.commit()
+    db.refresh(preference)
     
-    return {
-        "status": "success", 
-        "message": f"Updated {updated_count} notification preferences"
-    }
+    return {"status": "success", "message": "Notification preference updated"}
 
 
-@router.post("/fcm-token", response_model=dict)
+@router.put("/fcm-token")
 async def update_fcm_token(
-    token_data: dict,
-    current_user: dict = Depends(get_current_firebase_user),
+    fcm_token: str,
+    firebase_uid: str = Query(..., description="User Firebase UID from frontend"),
     db: Session = Depends(get_db)
 ):
-    """Update FCM token for push notifications."""
-    fcm_token = token_data.get("fcm_token")
-    if not fcm_token:
-        raise HTTPException(status_code=400, detail="FCM token is required")
+    """
+    Update FCM token for push notifications.
     
-    # Update user's FCM token
-    client = db.query(Client).filter(Client.firebase_uid == current_user["uid"]).first()
-    business = db.query(Business).filter(Business.firebase_uid == current_user["uid"]).first()
+    Updates the user's Firebase Cloud Messaging token for receiving push notifications.
+    """
+    # Find user
+    client = db.query(Client).filter(Client.firebase_uid == firebase_uid).first()
+    business = db.query(Business).filter(Business.firebase_uid == firebase_uid).first()
     
+    if not client and not business:
+        raise HTTPException(status_code=404, detail="User profile not found")
+    
+    # Update FCM token
     if client:
         client.fcm_token = fcm_token
-        client.fcm_token_updated_at = datetime.now()
-        db.commit()
-        return {"status": "success", "message": "Client FCM token updated"}
-    elif business:
-        business.fcm_token = fcm_token
-        business.fcm_token_updated_at = datetime.now()
-        db.commit()
-        return {"status": "success", "message": "Business FCM token updated"}
+        client.updated_at = datetime.utcnow()
     else:
-        raise HTTPException(status_code=404, detail="User profile not found")
-
-
-@router.post("/test-notification", response_model=dict)
-async def send_test_notification(
-    notification_data: dict,
-    current_user: dict = Depends(get_current_firebase_user),
-    db: Session = Depends(get_db)
-):
-    """Send a test notification (development only)."""
-    from app.core.credentials import is_development
+        business.fcm_token = fcm_token
+        business.updated_at = datetime.utcnow()
     
-    if not is_development():
-        raise HTTPException(status_code=403, detail="Test notifications only available in development")
-    
-    notification_type = notification_data.get("type", "email")
-    message = notification_data.get("message", "Test notification")
-    
-    # Get user
-    client = db.query(Client).filter(Client.firebase_uid == current_user["uid"]).first()
-    business = db.query(Business).filter(Business.firebase_uid == current_user["uid"]).first()
-    
-    if not (client or business):
-        raise HTTPException(status_code=404, detail="User profile not found")
-    
-    # Create test notification log
-    log = NotificationLog(
-        client_id=client.id if client else None,
-        business_id=business.id if business else None,
-        notification_type=NotificationType(notification_type),
-        event=NotificationEvent.NEW_MESSAGE,
-        title="Test Notification",
-        message=message,
-        status=NotificationStatus.SENT,
-        sent_at=datetime.now()
-    )
-    
-    db.add(log)
     db.commit()
     
-    return {"status": "success", "message": "Test notification created"}
+    return {"status": "success", "message": "FCM token updated successfully"}
 
 
-@router.get("/templates", response_model=List[dict])
-async def get_notification_templates(
-    event: Optional[NotificationEvent] = Query(None),
-    notification_type: Optional[NotificationType] = Query(None),
-    language: str = Query("en", max_length=10),
+@router.delete("/fcm-token")
+async def remove_fcm_token(
+    firebase_uid: str = Query(..., description="User Firebase UID from frontend"),
     db: Session = Depends(get_db)
 ):
-    """Get notification templates (admin or development use)."""
-    query = db.query(NotificationTemplate).filter(
-        NotificationTemplate.language == language
-    )
+    """
+    Remove FCM token (for logout/unregister device).
     
-    if event:
-        query = query.filter(NotificationTemplate.event == event)
-    if notification_type:
-        query = query.filter(NotificationTemplate.notification_type == notification_type)
+    Clears the user's FCM token to stop receiving push notifications on this device.
+    """
+    # Find user
+    client = db.query(Client).filter(Client.firebase_uid == firebase_uid).first()
+    business = db.query(Business).filter(Business.firebase_uid == firebase_uid).first()
     
-    templates = query.all()
+    if not client and not business:
+        raise HTTPException(status_code=404, detail="User profile not found")
     
-    result = []
-    for template in templates:
-        result.append({
-            "id": str(template.id),
-            "name": template.name,
-            "event": template.event,
-            "notification_type": template.notification_type,
-            "subject": template.subject,
-            "body_template": template.body_template,
-            "language": template.language,
-            "is_active": template.is_active
-        })
+    # Clear FCM token
+    if client:
+        client.fcm_token = None
+        client.updated_at = datetime.utcnow()
+    else:
+        business.fcm_token = None
+        business.updated_at = datetime.utcnow()
     
-    return result
+    db.commit()
+    
+    return {"status": "success", "message": "FCM token removed successfully"}
+
+
+@router.get("/unread-count")
+async def get_unread_notification_count(
+    firebase_uid: str = Query(..., description="User Firebase UID from frontend"),
+    db: Session = Depends(get_db)
+):
+    """
+    Get count of unread notifications.
+    
+    Returns the number of unread notifications for quick badge display.
+    """
+    # Verify user exists
+    client = db.query(Client).filter(Client.firebase_uid == firebase_uid).first()
+    business = db.query(Business).filter(Business.firebase_uid == firebase_uid).first()
+    
+    if not client and not business:
+        raise HTTPException(status_code=404, detail="User profile not found")
+    
+    # Count unread notifications (sent but not delivered)
+    unread_count = db.query(NotificationLog).filter(
+        NotificationLog.recipient_firebase_uid == firebase_uid,
+        NotificationLog.status == NotificationStatus.SENT
+    ).count()
+    
+    return {"unread_count": unread_count}
+
+
+@router.put("/{notification_id}/mark-read")
+async def mark_notification_read(
+    notification_id: uuid.UUID,
+    firebase_uid: str = Query(..., description="User Firebase UID from frontend"),
+    db: Session = Depends(get_db)
+):
+    """
+    Mark a specific notification as read.
+    
+    Updates the notification status to indicate it has been seen by the user.
+    """
+    notification = db.query(NotificationLog).filter(
+        NotificationLog.id == notification_id,
+        NotificationLog.recipient_firebase_uid == firebase_uid
+    ).first()
+    
+    if not notification:
+        raise HTTPException(status_code=404, detail="Notification not found")
+    
+    # Mark as delivered (read)
+    notification.mark_delivered()
+    
+    db.commit()
+    
+    return {"status": "success", "message": "Notification marked as read"}
+
+
+@router.put("/mark-all-read")
+async def mark_all_notifications_read(
+    firebase_uid: str = Query(..., description="User Firebase UID from frontend"),
+    db: Session = Depends(get_db)
+):
+    """
+    Mark all notifications as read.
+    
+    Bulk update to mark all unread notifications as read.
+    """
+    # Update all unread notifications
+    db.query(NotificationLog).filter(
+        NotificationLog.recipient_firebase_uid == firebase_uid,
+        NotificationLog.status == NotificationStatus.SENT
+    ).update({"status": NotificationStatus.DELIVERED})
+    
+    db.commit()
+    
+    return {"status": "success", "message": "All notifications marked as read"}

@@ -1,0 +1,407 @@
+# Bookora - Product Requirements Document
+
+## 1\. Overview
+
+**App Name:** Bookora
+
+Bookora is a comprehensive appointment booking Progressive Web App (PWA) that connects service providers with customers seeking various services such as salons, barbershops, spas, and other personal care businesses. The platform enables users to discover local businesses, view services and availability, and book appointments seamlessly through a mobile-optimized interface. Business owners can manage their services, schedules, and customer appointments while sharing their booking links for direct customer access.
+
+The target audience includes service-seeking customers who value convenience and efficiency in booking appointments, and service providers (salons, barbershops, spas, etc.) who want to streamline their booking process and reduce no-shows through automated notifications. The app solves the problem of inefficient appointment scheduling, missed appointments, and the lack of a centralized platform for service discovery and booking.
+
+## 2\. Essential Core Features
+
+### User Features
+
+* **Business Search & Discovery**: Advanced search functionality with filters for location, service type, rating, price range, and availability
+* **Appointment Booking**: Real-time availability checking and instant booking confirmation
+* **User Profile Management**: Personal information, booking history, preferences, and favorite businesses
+* **Push Notifications**: Firebase push notifications and email reminders for upcoming appointments
+* **Review & Rating System**: Post-appointment feedback and rating system
+* **Direct Link Booking**: Book appointments through shared business links
+* **Booking Management**: View, modify, and cancel upcoming appointments
+
+### Business/Vendor Features
+
+* **Business Profile Setup**: Comprehensive business information, services, pricing, and gallery
+* **Service Management**: Add, edit, and organize service offerings with duration and pricing
+* **Schedule Management**: Set working hours, breaks, and availability
+* **Appointment Dashboard**: View and manage all bookings with calendar integration
+* **Customer Communication**: Automated notifications and direct messaging capabilities
+* **Link Sharing**: Generate and share booking links for marketing purposes
+* **Analytics Dashboard**: Booking statistics, revenue tracking, and customer insights
+* **Staff Management**: Add team members and manage their schedules
+
+### System Features
+
+* **API Key Authentication**: Secure API access using key-based authentication
+* **Real-time Synchronization**: Instant updates for availability and bookings
+* **Email Integration**: SMTP-based email notifications for appointments
+* **Geolocation Services**: Location-based business discovery and mapping
+
+## 3\. Tech Stack
+
+### Front-End
+
+* **Framework**: React with TypeScript
+* **Styling**: Tailwind CSS for responsive design
+* **Build Tool**: Vite for fast development and optimized builds
+* **PWA Features**: Service workers, offline capability, app-like experience
+
+### Back-End
+
+* **Database**: Supabase (PostgreSQL-based) for data storage and real-time capabilities
+* **Authentication**: Custom Firebase UID integration (no Firebase Auth)
+* **Real-time**: Supabase real-time subscriptions for live updates
+
+### APIs & Integrations
+
+* **Firebase Cloud Messaging (FCM)**: Push notifications
+* **SMTP Service**: Email notifications (MTP integration)
+* **Maps API**: Google Maps for location services
+* **Payment Gateway**: Stripe integration for processing payments
+* **Calendar Integration**: Google Calendar sync capabilities
+
+### Specific Technical Requirements
+
+* **Security**: API key-based authentication system
+* **Database Fields**: firebase\_uid and fcmtoken fields for users and businesses
+* **Query System**: All database queries filtered by firebase\_uid
+* **Progressive Web App**: Installable, offline-capable mobile experience
+
+## 4\. Design Preferences
+
+### Interface
+
+The design should embody a modern, clean aesthetic with a focus on usability and mobile-first experience, featuring intuitive navigation and clear visual hierarchy that promotes trust and professionalism in the service booking process.
+
+### Color Palette
+
+* **Primary**: #6366F1 (Indigo) - Professional and trustworthy
+* **Secondary**: #F3F4F6 (Light Gray) - Clean background and subtle elements
+* **Accent**: #10B981 (Emerald) - Success states and call-to-action buttons
+* **Supporting Colors**: #EF4444 (Red) for errors, #F59E0B (Amber) for warnings
+
+### Typography
+
+* **Headings**: Inter or Poppins for modern, readable headlines
+* **Body Text**: System fonts (SF Pro Display, Segoe UI, Roboto) for optimal readability
+* **Font Sizes**: Responsive typography scaling for mobile devices
+
+### Additional Design Considerations
+
+* Card-based layouts for business listings and appointments
+* Prominent call-to-action buttons optimized for touch interaction
+* Consistent spacing and visual rhythm throughout the interface
+* Accessibility compliance with proper contrast ratios and touch targets
+
+## 5\. All Screens/Pages
+
+### `/onboarding`
+
+**Onboarding Screen**
+
+* Welcome carousel with app benefits and features
+* User type selection (Customer or Business Owner)
+* Firebase UID input/setup
+* FCM token registration
+* Location permissions request
+* Navigation: Entry point → Profile setup or Main dashboard
+
+### `/auth/setup`
+
+**Profile Setup Screen**
+
+* User type confirmation
+* Basic information form (name, phone, email)
+* Profile picture upload
+* Location/address input
+* Notification preferences toggle
+* Navigation: From onboarding → Main dashboard
+
+### `/dashboard`
+
+**Main Dashboard (Customer)**
+
+* Search bar with location and service filters
+* Featured businesses carousel
+* Category grid (Salon, Barbershop, Spa, etc.)
+* Recent bookings section
+* Quick action buttons (Book Again, View History)
+* Navigation: Bottom tabs → Search, Bookings, Profile
+
+### `/search`
+
+**Search & Discovery Screen**
+
+* Advanced search filters (location, service, price, rating, availability)
+* Map view toggle
+* Business listing cards with ratings, distance, and pricing
+* Sort options (distance, rating, price, availability)
+* Filter sidebar/modal
+* Navigation: From dashboard, bottom navigation
+
+### `/business/:businessId`
+
+**Business Profile Screen**
+
+* Business header with images, name, rating, and contact info
+* Services list with pricing and duration
+* Staff profiles and specialties
+* Reviews and ratings section
+* Photo gallery
+* Book appointment CTA button
+* Share business link button
+* Navigation: From search results → Booking flow
+
+### `/booking/:businessId`
+
+**Booking Flow Screen**
+
+* Service selection with pricing
+* Staff member selection (if applicable)
+* Date picker with available slots
+* Time slot selection grid
+* Customer information confirmation
+* Special requests text area
+* Booking summary with total cost
+* Confirm booking button
+* Navigation: From business profile → Booking confirmation
+
+### `/booking/confirmation/:bookingId`
+
+**Booking Confirmation Screen**
+
+* Booking success message
+* Appointment details card (date, time, service, business)
+* Add to calendar button
+* Booking reference number
+* Business contact information
+* Reschedule/cancel options
+* Navigation: From booking flow → Dashboard
+
+### `/bookings`
+
+**My Bookings Screen**
+
+* Tabs for Upcoming, Past, and Cancelled bookings
+* Booking cards with quick actions
+* Filter and search functionality
+* Booking status indicators
+* Quick rebook button for past appointments
+* Navigation: Bottom navigation, accessible from dashboard
+
+### `/booking/details/:bookingId`
+
+**Booking Details Screen**
+
+* Complete appointment information
+* Business details and location
+* Service provider information
+* Reschedule appointment option
+* Cancel appointment option
+* Add to calendar button
+* Get directions button
+* Navigation: From bookings list → Reschedule/Cancel flows
+
+### `/profile`
+
+**User Profile Screen**
+
+* Profile picture and basic information
+* Account settings section
+* Notification preferences
+* Favorite businesses
+* Payment methods
+* Help & Support links
+* App version and legal links
+* Navigation: Bottom navigation, settings access
+
+### `/business/dashboard`
+
+**Business Dashboard**
+
+* Today's appointments overview
+* Revenue summary cards
+* Quick stats (total bookings, ratings, revenue)
+* Recent customer reviews
+* Calendar integration
+* Quick action buttons
+* Navigation: Main hub for business users
+
+### `/business/appointments`
+
+**Appointment Management Screen**
+
+* Calendar view with appointment blocks
+* List view toggle
+* Appointment status management
+* Customer contact information
+* Reschedule/cancel capabilities
+* Add manual appointment option
+* Navigation: From business dashboard
+
+### `/business/services`
+
+**Service Management Screen**
+
+* Service list with edit/delete actions
+* Add new service form
+* Service categories organization
+* Pricing and duration management
+* Service availability settings
+* Navigation: From business dashboard
+
+### `/business/profile`
+
+**Business Profile Management**
+
+* Business information editing
+* Photo gallery management
+* Operating hours configuration
+* Staff member management
+* Location and contact details
+* Social media links
+* Navigation: From business dashboard
+
+### `/business/analytics`
+
+**Analytics Dashboard**
+
+* Booking statistics charts
+* Revenue tracking graphs
+* Customer demographics
+* Popular services analysis
+* Review sentiment analysis
+* Export data functionality
+* Navigation: From business dashboard
+
+### `/link/:businessLinkId`
+
+**Direct Booking Link Screen**
+
+* Business header with branding
+* Streamlined booking flow
+* Service selection
+* Available time slots
+* Customer information form
+* Direct booking confirmation
+* Navigation: External entry point → Booking confirmation
+
+## 6\. App Menu and Navigation Structure
+
+### Navigation System
+
+**Bottom Tab Navigation** (Primary navigation for mobile PWA)
+
+* **Home**: Dashboard with search and featured businesses
+* **Search**: Advanced search and discovery
+* **Bookings**: User appointment management
+* **Profile**: Account settings and preferences
+
+### Business User Navigation
+
+**Bottom Tab Navigation**
+
+* **Dashboard**: Overview and daily appointments
+* **Calendar**: Appointment management
+* **Services**: Service and staff management
+* **Analytics**: Business insights and reports
+
+### Secondary Navigation
+
+* **Hamburger Menu**: Accessible from header for additional options
+    * Settings and preferences
+    * Help and support
+    * Legal information
+    * App version details
+
+### Navigation Hierarchy
+
+1. **Primary Level**: Bottom tabs for main app sections
+2. **Secondary Level**: Screen-specific actions in headers and floating buttons
+3. **Tertiary Level**: Modal screens and slide-up panels for forms and details
+
+## 7\. User Flow
+
+### Customer User Flow
+
+1. **App Launch & Setup**
+    * User opens Bookora PWA
+    * Views onboarding screens explaining key features
+    * Selects "Customer" user type
+    * Enters/generates Firebase UID
+    * Grants location and notification permissions
+    * Completes basic profile setup (name, email, phone)
+    * FCM token automatically registered
+2. **Service Discovery**
+    * Lands on main dashboard
+    * Views featured businesses and service categories
+    * Enters search query or selects category (e.g., "Salon")
+    * Applies filters (location, price range, rating, availability)
+    * Browses business listings with ratings and photos
+    * Taps on preferred business to view detailed profile
+3. **Booking Process**
+    * Reviews business services, photos, and reviews
+    * Taps "Book Appointment" button
+    * Selects desired service from list
+    * Chooses preferred staff member (if applicable)
+    * Picks available date from calendar
+    * Selects time slot from available options
+    * Reviews and confirms personal information
+    * Adds special requests or notes
+    * Reviews booking summary and total cost
+    * Confirms appointment booking
+4. **Post-Booking Experience**
+    * Receives booking confirmation screen with details
+    * Gets immediate email confirmation
+    * Adds appointment to device calendar
+    * Receives push notification reminder 24 hours before
+    * Gets email reminder 2 hours before appointment
+    * Attends appointment and receives post-service review prompt
+5. **Ongoing Usage**
+    * Views upcoming appointments in "My Bookings"
+    * Reschedules or cancels appointments as needed
+    * Leaves reviews and ratings after services
+    * Saves favorite businesses for quick rebooking
+    * Receives personalized recommendations based on history
+
+### Business User Flow
+
+1. **Business Setup**
+    * Opens Bookora PWA and selects "Business Owner"
+    * Enters Firebase UID and completes initial setup
+    * Fills comprehensive business profile (name, description, location)
+    * Uploads business photos and logo
+    * Sets operating hours and break times
+    * Adds services with descriptions, pricing, and duration
+    * Adds staff members and their specialties
+    * Configures notification preferences
+2. **Daily Operations**
+    * Logs into business dashboard
+    * Reviews daily appointment schedule
+    * Checks new booking notifications
+    * Manages appointment confirmations and changes
+    * Communicates with customers through in-app messaging
+    * Updates availability for specific dates/times
+    * Processes walk-in appointments by manual entry
+3. **Customer Management**
+    * Receives new booking notifications via push and email
+    * Reviews customer information and service requests
+    * Confirms or reschedules appointments as needed
+    * Sends appointment reminders and updates
+    * Handles cancellations and refund requests
+    * Views customer history and preferences
+4. **Business Growth**
+    * Generates and shares booking links on social media
+    * Monitors business analytics and performance metrics
+    * Responds to customer reviews and feedback
+    * Updates service offerings and pricing
+    * Manages promotional campaigns and special offers
+    * Exports customer data for marketing purposes
+5. **Link-Based Bookings**
+    * Customer clicks shared business link
+    * Directed to streamlined booking interface
+    * Completes abbreviated booking flow
+    * Business receives notification of new appointment
+    * Customer added to business customer database
+    * Standard appointment workflow continues

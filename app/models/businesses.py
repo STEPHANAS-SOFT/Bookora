@@ -84,6 +84,8 @@ class Business(BaseModel, LocationMixin, FirebaseUserMixin):
     
     # Business Settings
     status = Column(SQLEnum(BusinessStatus), default=BusinessStatus.PENDING, nullable=False)
+    is_active = Column(Boolean, default=True, nullable=False, comment="Whether business is active")
+    is_approved = Column(Boolean, default=False, nullable=False, comment="Whether business is approved by admin")
     timezone = Column(String(50), default="UTC", nullable=False, comment="Business timezone for appointments")
     
     # Booking Settings
@@ -113,6 +115,7 @@ class Business(BaseModel, LocationMixin, FirebaseUserMixin):
     services = relationship("Service", back_populates="business", cascade="all, delete-orphan")
     business_hours = relationship("BusinessHours", back_populates="business", cascade="all, delete-orphan")
     appointments = relationship("Appointment", back_populates="business")
+    staff_members = relationship("StaffMember", back_populates="business", cascade="all, delete-orphan")
     
     @hybrid_property
     def booking_url(self) -> str:
@@ -140,6 +143,9 @@ class Service(BaseModel):
     description = Column(Text, nullable=True)
     duration_minutes = Column(Integer, nullable=False, comment="Service duration in minutes")
     price = Column(DECIMAL(10, 2), nullable=True, comment="Service price")
+    
+    # Service image
+    service_image_url = Column(String(500), nullable=True, comment="Service image URL")
     
     # Service Settings
     is_active = Column(Boolean, default=True, nullable=False)
@@ -191,3 +197,34 @@ class BusinessHours(BaseModel):
         if self.is_closed:
             return f"<BusinessHours({self.day_of_week}: CLOSED)>"
         return f"<BusinessHours({self.day_of_week}: {self.open_time}-{self.close_time})>"
+
+
+class BusinessGallery(BaseModel):
+    """
+    Model for business photo gallery.
+    
+    Stores multiple photos/images for a business to showcase
+    their work, facilities, and services.
+    """
+    __tablename__ = "business_gallery"
+    
+    business_id = Column(UUID(as_uuid=True), ForeignKey("businesses.id"), nullable=False, index=True)
+    
+    # Image details
+    image_url = Column(String(500), nullable=False, comment="Image URL")
+    image_title = Column(String(200), nullable=True, comment="Image title or caption")
+    image_description = Column(Text, nullable=True, comment="Image description")
+    
+    # Display settings
+    sort_order = Column(Integer, default=0, comment="Display order in gallery")
+    is_primary = Column(Boolean, default=False, comment="Primary/featured image")
+    is_active = Column(Boolean, default=True, nullable=False)
+    
+    # Image metadata
+    image_type = Column(String(50), nullable=True, comment="Type: exterior, interior, work_sample, team, etc.")
+    
+    # Relationships
+    business = relationship("Business", backref="gallery_images")
+    
+    def __repr__(self):
+        return f"<BusinessGallery(business={self.business.name if self.business else 'None'}, title='{self.image_title}')>"

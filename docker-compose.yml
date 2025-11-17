@@ -5,10 +5,12 @@ services:
   postgres:
     image: postgis/postgis:15-3.3
     container_name: bookora_postgres
+    env_file:
+      - .env
     environment:
-      POSTGRES_DB: bookora
-      POSTGRES_USER: bookora_user
-      POSTGRES_PASSWORD: bookora_password
+      POSTGRES_DB: ${DATABASE_NAME:-bookora}
+      POSTGRES_USER: ${DATABASE_USER:-bookora_user}
+      POSTGRES_PASSWORD: ${DATABASE_PASSWORD:-bookora_password}
       PGDATA: /var/lib/postgresql/data/pgdata
     volumes:
       - postgres_data:/var/lib/postgresql/data
@@ -46,9 +48,11 @@ services:
   pgadmin:
     image: dpage/pgadmin4:latest
     container_name: bookora_pgadmin
+    env_file:
+      - .env
     environment:
-      PGADMIN_DEFAULT_EMAIL: admin@bookora.com
-      PGADMIN_DEFAULT_PASSWORD: admin123
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_EMAIL:-admin@bookora.com}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD:-admin123}
       PGADMIN_CONFIG_SERVER_MODE: 'False'
     volumes:
       - pgadmin_data:/var/lib/pgadmin
@@ -59,68 +63,167 @@ services:
     restart: unless-stopped
     depends_on:
       - postgres
-  # FastAPI Application (uncomment when ready to run in containers)
-  # api:
-  #   build: .
-  #   container_name: bookora_api
-  #   environment:
-  #     DATABASE_URL: postgresql://bookora_user:bookora_password@postgres:5432/bookora
-  #     REDIS_URL: redis://redis:6379/0
-  #   ports:
-  #     - "8000:8000"
-  #   volumes:
-  #     - .:/app
-  #     - ./uploads:/app/uploads
-  #   networks:
-  #     - bookora_network
-  #   depends_on:
-  #     postgres:
-  #       condition: service_healthy
-  #     redis:
-  #       condition: service_healthy
-  #   restart: unless-stopped
-  #   command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+  # FastAPI Application
+  api:
+    build: .
+    container_name: bookora_api
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql://${DATABASE_USER:-bookora_user}:${DATABASE_PASSWORD:-bookora_password}@postgres:5432/${DATABASE_NAME:-bookora}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      ENVIRONMENT: ${ENVIRONMENT:-production}
+      DEBUG: ${DEBUG:-False}
+    ports:
+      - "8000:8000"
+    volumes:
+      - .:/app
+      - ./uploads:/app/uploads
+      - ./logs:/app/logs
+      - ./backups:/app/backups
+    networks:
+      - bookora_network
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 4
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
 
-  # Celery Worker (uncomment when ready)
-  # celery_worker:
-  #   build: .
-  #   container_name: bookora_celery_worker
-  #   environment:
-  #     DATABASE_URL: postgresql://bookora_user:bookora_password@postgres:5432/bookora
-  #     REDIS_URL: redis://redis:6379/0
-  #   volumes:
-  #     - .:/app
-  #   networks:
-  #     - bookora_network
-  #   depends_on:
-  #     - postgres
-  #     - redis
-  #   restart: unless-stopped
-  #   command: celery -A app.core.celery worker --loglevel=info
+  # Celery Worker for background tasks
+  celery_worker:
+    build: .
+    container_name: bookora_celery_worker
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql://${DATABASE_USER:-bookora_user}:${DATABASE_PASSWORD:-bookora_password}@postgres:5432/${DATABASE_NAME:-bookora}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+    volumes:
+      - .:/app
+      - ./logs:/app/logs
+    networks:
+      - bookora_network
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    command: celery -A app.core.celery_app worker --loglevel=info --concurrency=4 --queues=appointments,notifications,reviews,maintenance
+    healthcheck:
+      test: ["CMD-SHELL", "celery -A app.core.celery_app inspect ping || exit 1"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
 
-  # Celery Beat (scheduler - uncomment when ready)
-  # celery_beat:
-  #   build: .
-  #   container_name: bookora_celery_beat
-  #   environment:
-  #     DATABASE_URL: postgresql://bookora_user:bookora_password@postgres:5432/bookora
-  #     REDIS_URL: redis://redis:6379/0
-  #   volumes:
-  #     - .:/app
-  #   networks:
-  #     - bookora_network
-  #   depends_on:
-  #     - postgres
-  #     - redis
-  #   restart: unless-stopped
-  #   command: celery -A app.core.celery beat --loglevel=info
+  # Celery Beat (scheduler for periodic tasks)
+  celery_beat:
+    build: .
+    container_name: bookora_celery_beat
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql://${DATABASE_USER:-bookora_user}:${DATABASE_PASSWORD:-bookora_password}@postgres:5432/${DATABASE_NAME:-bookora}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+    volumes:
+      - .:/app
+      - ./logs:/app/logs
+      - celery_beat_data:/app/celerybeat-schedule
+    networks:
+      - bookora_network
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    command: celery -A app.core.celery_app beat --loglevel=info
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # Flower - Celery Monitoring UI (Optional)
+  flower:
+    build: .
+    container_name: bookora_flower
+    env_file:
+      - .env
+    environment:
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+    ports:
+      - "5555:5555"
+    networks:
+      - bookora_network
+    depends_on:
+      - redis
+      - celery_worker
+    restart: unless-stopped
+    command: celery -A app.core.celery_app flower --port=5555
+    profiles:
+      - monitoring
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "5m"
+        max-file: "2"
+
+  # Nginx Reverse Proxy (Optional for production)
+  nginx:
+    image: nginx:alpine
+    container_name: bookora_nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/ssl:/etc/nginx/ssl:ro
+      - ./static:/usr/share/nginx/html/static:ro
+    networks:
+      - bookora_network
+    depends_on:
+      - api
+    restart: unless-stopped
+    profiles:
+      - production
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
 
 volumes:
   postgres_data:
+    driver: local
   redis_data:
+    driver: local
   pgadmin_data:
-
+    driver: local
+  celery_beat_data:
+    driver: local
 
 networks:
   bookora_network:
     driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
