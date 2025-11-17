@@ -52,9 +52,14 @@ app = FastAPI(
     title="Bookora API",
     description="Multi-tenant appointment booking REST API for businesses and clients",
     version="1.0.0",
-    openapi_url=f"{settings.API_V1_STR}/openapi.json" if settings.ENVIRONMENT != "production" else None,
-    docs_url="/docs" if settings.ENVIRONMENT != "production" else None,
-    redoc_url="/redoc" if settings.ENVIRONMENT != "production" else None,
+    root_path="/bookora",
+    servers=[
+        {"url": "https://wiseappsdev.cloud/bookora", "description": "Production server"},
+        {"url": "http://localhost:8500", "description": "Local development"}
+    ],
+    openapi_url="/api/v1/openapi.json",
+    docs_url="/docs",
+    redoc_url="/redoc",
     lifespan=lifespan
 )
 
