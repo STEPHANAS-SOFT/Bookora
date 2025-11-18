@@ -36,6 +36,10 @@ class BusinessBase(BaseModel):
     business_email: Optional[str] = Field(None, max_length=255)
     timezone: str = Field("UTC", max_length=50)
     
+    # Business images
+    logo_url: Optional[str] = Field(None, max_length=500, description="Business logo image URL")
+    cover_image_url: Optional[str] = Field(None, max_length=500, description="Business cover/banner image URL")
+    
     # Location fields
     address: Optional[str] = Field(None, max_length=255)
     city: Optional[str] = Field(None, max_length=100)

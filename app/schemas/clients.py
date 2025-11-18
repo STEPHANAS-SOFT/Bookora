@@ -16,6 +16,10 @@ class ClientBase(BaseModel):
     date_of_birth: Optional[date]
     gender: Optional[str] = Field(None, max_length=20)
     
+    # Profile fields
+    profile_image_url: Optional[str] = Field(None, max_length=500, description="Client profile image URL")
+    bio: Optional[str] = Field(None, max_length=1000, description="Client bio or notes")
+    
     # Location fields
     address: Optional[str] = Field(None, max_length=255)
     city: Optional[str] = Field(None, max_length=100)

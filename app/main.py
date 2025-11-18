@@ -48,20 +48,25 @@ async def lifespan(app: FastAPI):
 
 
 # Create FastAPI application
-app = FastAPI(
-    title="Bookora API",
-    description="Multi-tenant appointment booking REST API for businesses and clients",
-    version="1.0.0",
-    root_path="/bookora",
-    servers=[
-        {"url": "https://wiseappsdev.cloud/bookora", "description": "Production server"},
-        {"url": "http://localhost:8500", "description": "Local development"}
-    ],
-    openapi_url="/api/v1/openapi.json",
-    docs_url="/docs",
-    redoc_url="/redoc",
-    lifespan=lifespan
-)
+# Only use root_path in production (when deployed behind Nginx with /bookora prefix)
+app_kwargs = {
+    "title": "Bookora API",
+    "description": "Multi-tenant appointment booking REST API for businesses and clients",
+    "version": "1.0.0",
+    "openapi_url": "/api/v1/openapi.json",
+    "docs_url": "/docs",
+    "redoc_url": "/redoc",
+    "lifespan": lifespan
+}
+
+# Add root_path and servers only in production
+if settings.ENVIRONMENT == "production":
+    app_kwargs["root_path"] = "/bookora"
+    app_kwargs["servers"] = [
+        {"url": "https://wiseappsdev.cloud/bookora", "description": "Production server"}
+    ]
+
+app = FastAPI(**app_kwargs)
 
 # Add API Key security scheme to Swagger UI
 from fastapi.openapi.utils import get_openapi
