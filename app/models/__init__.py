@@ -9,7 +9,7 @@ from app.core.database import Base
 
 # Import all models to register them with SQLAlchemy
 from app.models.clients import Client
-from app.models.businesses import Business, BusinessCategory, Service, BusinessHours, BusinessGallery
+from app.models.businesses import Business, BusinessCategory, Service, BusinessHours, BusinessGallery, ServiceGallery
 from app.models.appointments import Appointment
 from app.models.communications import ChatRoom, ChatMessage
 from app.models.notifications import NotificationTemplate, NotificationLog, NotificationPreference

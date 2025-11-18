@@ -143,6 +143,9 @@ class ServiceBase(BaseModel):
     duration_minutes: int = Field(..., ge=15, le=480)
     price: Optional[Decimal] = Field(None, ge=0)
     
+    # Service image (primary image)
+    service_image_url: Optional[str] = Field(None, max_length=500)
+    
     # Service settings
     requires_deposit: bool = False
     deposit_amount: Optional[Decimal] = Field(None, ge=0)
@@ -176,6 +179,9 @@ class ServiceResponse(BaseModel):
     description: Optional[str]
     duration_minutes: int
     price: Optional[Decimal]
+    
+    # Service image (primary image)
+    service_image_url: Optional[str]
     
     # Service settings
     is_active: bool
@@ -228,6 +234,92 @@ class BusinessHoursResponse(BaseModel):
     close_time: Optional[time]
     break_start: Optional[time]
     break_end: Optional[time]
+    created_at: datetime
+    updated_at: datetime
+    
+    model_config = {"from_attributes": True}
+
+
+# Business Gallery Schemas
+class BusinessGalleryBase(BaseModel):
+    """Base schema for business gallery images."""
+    image_url: str = Field(..., max_length=500)
+    image_title: Optional[str] = Field(None, max_length=200)
+    image_description: Optional[str] = Field(None, max_length=1000)
+    sort_order: int = Field(0, ge=0)
+    is_primary: bool = False
+    image_type: Optional[str] = Field(None, max_length=50)
+
+
+class BusinessGalleryCreate(BusinessGalleryBase):
+    """Schema for creating a business gallery image."""
+    pass
+
+
+class BusinessGalleryUpdate(BaseModel):
+    """Schema for updating a business gallery image."""
+    image_title: Optional[str] = Field(None, max_length=200)
+    image_description: Optional[str] = Field(None, max_length=1000)
+    sort_order: Optional[int] = Field(None, ge=0)
+    is_primary: Optional[bool]
+    is_active: Optional[bool]
+    image_type: Optional[str] = Field(None, max_length=50)
+
+
+class BusinessGalleryResponse(BaseModel):
+    """Response schema for business gallery image."""
+    id: uuid.UUID
+    business_id: uuid.UUID
+    image_url: str
+    image_title: Optional[str]
+    image_description: Optional[str]
+    sort_order: int
+    is_primary: bool
+    is_active: bool
+    image_type: Optional[str]
+    created_at: datetime
+    updated_at: datetime
+    
+    model_config = {"from_attributes": True}
+
+
+# Service Gallery Schemas
+class ServiceGalleryBase(BaseModel):
+    """Base schema for service gallery images."""
+    image_url: str = Field(..., max_length=500)
+    image_title: Optional[str] = Field(None, max_length=200)
+    image_description: Optional[str] = Field(None, max_length=1000)
+    sort_order: int = Field(0, ge=0)
+    is_primary: bool = False
+    image_type: Optional[str] = Field(None, max_length=50)
+
+
+class ServiceGalleryCreate(ServiceGalleryBase):
+    """Schema for creating a service gallery image."""
+    pass
+
+
+class ServiceGalleryUpdate(BaseModel):
+    """Schema for updating a service gallery image."""
+    image_title: Optional[str] = Field(None, max_length=200)
+    image_description: Optional[str] = Field(None, max_length=1000)
+    sort_order: Optional[int] = Field(None, ge=0)
+    is_primary: Optional[bool]
+    is_active: Optional[bool]
+    image_type: Optional[str] = Field(None, max_length=50)
+
+
+class ServiceGalleryResponse(BaseModel):
+    """Response schema for service gallery image."""
+    id: uuid.UUID
+    service_id: uuid.UUID
+    image_url: str
+    image_title: Optional[str]
+    image_description: Optional[str]
+    sort_order: int
+    is_primary: bool
+    is_active: bool
+    image_type: Optional[str]
     created_at: datetime
     updated_at: datetime
     

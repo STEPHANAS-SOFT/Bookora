@@ -228,3 +228,34 @@ class BusinessGallery(BaseModel):
     
     def __repr__(self):
         return f"<BusinessGallery(business={self.business.name if self.business else 'None'}, title='{self.image_title}')>"
+
+
+class ServiceGallery(BaseModel):
+    """
+    Model for service photo gallery.
+    
+    Stores multiple photos/images for a service to showcase
+    examples of the service work, before/after photos, etc.
+    """
+    __tablename__ = "service_gallery"
+    
+    service_id = Column(UUID(as_uuid=True), ForeignKey("services.id"), nullable=False, index=True)
+    
+    # Image details
+    image_url = Column(String(500), nullable=False, comment="Image URL")
+    image_title = Column(String(200), nullable=True, comment="Image title or caption")
+    image_description = Column(Text, nullable=True, comment="Image description")
+    
+    # Display settings
+    sort_order = Column(Integer, default=0, comment="Display order in gallery")
+    is_primary = Column(Boolean, default=False, comment="Primary/featured image")
+    is_active = Column(Boolean, default=True, nullable=False)
+    
+    # Image metadata
+    image_type = Column(String(50), nullable=True, comment="Type: before, after, in_progress, result, etc.")
+    
+    # Relationships
+    service = relationship("Service", backref="gallery_images")
+    
+    def __repr__(self):
+        return f"<ServiceGallery(service={self.service.name if self.service else 'None'}, title='{self.image_title}')>"

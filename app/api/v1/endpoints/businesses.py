@@ -16,11 +16,13 @@ import uuid
 
 from app.core.database import get_db
 from app.models.businesses import (
-    Business, BusinessCategory, Service, BusinessHours
+    Business, BusinessCategory, Service, BusinessHours, BusinessGallery, ServiceGallery
 )
 from app.schemas.businesses import (
     BusinessCreate, BusinessUpdate, BusinessResponse, BusinessListResponse,
-    BusinessCategoryResponse, ServiceCreate, ServiceUpdate, ServiceResponse
+    BusinessCategoryResponse, ServiceCreate, ServiceUpdate, ServiceResponse,
+    BusinessGalleryCreate, BusinessGalleryUpdate, BusinessGalleryResponse,
+    ServiceGalleryCreate, ServiceGalleryUpdate, ServiceGalleryResponse
 )
 
 router = APIRouter()
@@ -358,3 +360,352 @@ async def delete_service(
     db.commit()
     
     return {"message": "Service deleted successfully"}
+
+
+# ============================================================
+# BUSINESS GALLERY ENDPOINTS
+# ============================================================
+
+@router.post("/gallery/add", response_model=BusinessGalleryResponse)
+async def add_business_gallery_image(
+    image_data: BusinessGalleryCreate,
+    firebase_uid: str = Query(..., description="Firebase UID from frontend"),
+    db: Session = Depends(get_db)
+):
+    """
+    Add an image to business gallery.
+    
+    **Purpose**: Upload and add photos to showcase the business (interior, exterior, work samples, team, etc.).
+    
+    **Who uses it**: Business owners
+    
+    **FlutterFlow**: User uploads image to Firebase Storage, gets URL, then calls this endpoint with the URL.
+    
+    **Example image types**: exterior, interior, work_sample, team, product, etc.
+    """
+    # Get business by Firebase UID
+    business = db.query(Business).filter(
+        Business.firebase_uid == firebase_uid
+    ).first()
+    
+    if not business:
+        raise HTTPException(status_code=404, detail="Business not found")
+    
+    # Create gallery image
+    gallery_image = BusinessGallery(
+        business_id=business.id,
+        **image_data.model_dump()
+    )
+    
+    db.add(gallery_image)
+    db.commit()
+    db.refresh(gallery_image)
+    
+    return gallery_image
+
+
+@router.get("/gallery", response_model=List[BusinessGalleryResponse])
+async def get_business_gallery(
+    business_id: uuid.UUID = Query(..., description="Business ID"),
+    active_only: bool = Query(True, description="Return only active images"),
+    db: Session = Depends(get_db)
+):
+    """
+    Get all gallery images for a business.
+    
+    **Purpose**: Retrieve all photos associated with a business for display in the app.
+    
+    **Who uses it**: Clients viewing business profile, business owners managing gallery.
+    
+    **FlutterFlow**: Display in a gallery/carousel widget on business profile page.
+    """
+    query = db.query(BusinessGallery).filter(
+        BusinessGallery.business_id == business_id
+    )
+    
+    if active_only:
+        query = query.filter(BusinessGallery.is_active == True)
+    
+    images = query.order_by(BusinessGallery.sort_order, BusinessGallery.created_at).all()
+    
+    return images
+
+
+@router.get("/gallery/my", response_model=List[BusinessGalleryResponse])
+async def get_my_business_gallery(
+    firebase_uid: str = Query(..., description="Firebase UID from frontend"),
+    db: Session = Depends(get_db)
+):
+    """
+    Get gallery images for the current business owner.
+    
+    **Purpose**: Business owners can view and manage their gallery.
+    
+    **Who uses it**: Business owners
+    
+    **FlutterFlow**: Display in business dashboard gallery management section.
+    """
+    business = db.query(Business).filter(
+        Business.firebase_uid == firebase_uid
+    ).first()
+    
+    if not business:
+        raise HTTPException(status_code=404, detail="Business not found")
+    
+    images = db.query(BusinessGallery).filter(
+        BusinessGallery.business_id == business.id
+    ).order_by(BusinessGallery.sort_order, BusinessGallery.created_at).all()
+    
+    return images
+
+
+@router.put("/gallery/{image_id}", response_model=BusinessGalleryResponse)
+async def update_business_gallery_image(
+    image_id: uuid.UUID,
+    image_data: BusinessGalleryUpdate,
+    firebase_uid: str = Query(..., description="Firebase UID from frontend"),
+    db: Session = Depends(get_db)
+):
+    """
+    Update gallery image details (title, description, order, etc.).
+    
+    **Purpose**: Business owners can edit image metadata, reorder gallery, set primary image.
+    
+    **Who uses it**: Business owners
+    
+    **FlutterFlow**: Edit form for each gallery image.
+    """
+    # Get business
+    business = db.query(Business).filter(
+        Business.firebase_uid == firebase_uid
+    ).first()
+    
+    if not business:
+        raise HTTPException(status_code=404, detail="Business not found")
+    
+    # Get image
+    image = db.query(BusinessGallery).filter(
+        BusinessGallery.id == image_id,
+        BusinessGallery.business_id == business.id
+    ).first()
+    
+    if not image:
+        raise HTTPException(status_code=404, detail="Gallery image not found")
+    
+    # Update image
+    update_dict = image_data.model_dump(exclude_unset=True)
+    for key, value in update_dict.items():
+        setattr(image, key, value)
+    
+    db.commit()
+    db.refresh(image)
+    
+    return image
+
+
+@router.delete("/gallery/{image_id}")
+async def delete_business_gallery_image(
+    image_id: uuid.UUID,
+    firebase_uid: str = Query(..., description="Firebase UID from frontend"),
+    db: Session = Depends(get_db)
+):
+    """
+    Delete a gallery image.
+    
+    **Purpose**: Business owners can remove photos from their gallery.
+    
+    **Who uses it**: Business owners
+    
+    **FlutterFlow**: Delete button on each gallery image with confirmation dialog.
+    
+    **Note**: This only deletes the database record. FlutterFlow should also delete the image from Firebase Storage.
+    """
+    # Get business
+    business = db.query(Business).filter(
+        Business.firebase_uid == firebase_uid
+    ).first()
+    
+    if not business:
+        raise HTTPException(status_code=404, detail="Business not found")
+    
+    # Get image
+    image = db.query(BusinessGallery).filter(
+        BusinessGallery.id == image_id,
+        BusinessGallery.business_id == business.id
+    ).first()
+    
+    if not image:
+        raise HTTPException(status_code=404, detail="Gallery image not found")
+    
+    db.delete(image)
+    db.commit()
+    
+    return {"message": "Gallery image deleted successfully"}
+
+
+# ============================================================
+# SERVICE GALLERY ENDPOINTS
+# ============================================================
+
+@router.post("/services/{service_id}/gallery/add", response_model=ServiceGalleryResponse)
+async def add_service_gallery_image(
+    service_id: uuid.UUID,
+    image_data: ServiceGalleryCreate,
+    firebase_uid: str = Query(..., description="Firebase UID from frontend"),
+    db: Session = Depends(get_db)
+):
+    """
+    Add an image to service gallery.
+    
+    **Purpose**: Upload and add photos to showcase the service (before/after, work samples, results, etc.).
+    
+    **Who uses it**: Business owners
+    
+    **FlutterFlow**: User uploads image to Firebase Storage, gets URL, then calls this endpoint with the URL.
+    
+    **Example image types**: before, after, in_progress, result, sample, etc.
+    """
+    # Get business by Firebase UID
+    business = db.query(Business).filter(
+        Business.firebase_uid == firebase_uid
+    ).first()
+    
+    if not business:
+        raise HTTPException(status_code=404, detail="Business not found")
+    
+    # Verify service belongs to business
+    service = db.query(Service).filter(
+        Service.id == service_id,
+        Service.business_id == business.id
+    ).first()
+    
+    if not service:
+        raise HTTPException(status_code=404, detail="Service not found")
+    
+    # Create gallery image
+    gallery_image = ServiceGallery(
+        service_id=service_id,
+        **image_data.model_dump()
+    )
+    
+    db.add(gallery_image)
+    db.commit()
+    db.refresh(gallery_image)
+    
+    return gallery_image
+
+
+@router.get("/services/{service_id}/gallery", response_model=List[ServiceGalleryResponse])
+async def get_service_gallery(
+    service_id: uuid.UUID,
+    active_only: bool = Query(True, description="Return only active images"),
+    db: Session = Depends(get_db)
+):
+    """
+    Get all gallery images for a service.
+    
+    **Purpose**: Retrieve all photos associated with a service for display in the app.
+    
+    **Who uses it**: Clients viewing service details, business owners managing service gallery.
+    
+    **FlutterFlow**: Display in a gallery/carousel widget on service detail page.
+    """
+    # Verify service exists
+    service = db.query(Service).filter(Service.id == service_id).first()
+    if not service:
+        raise HTTPException(status_code=404, detail="Service not found")
+    
+    query = db.query(ServiceGallery).filter(
+        ServiceGallery.service_id == service_id
+    )
+    
+    if active_only:
+        query = query.filter(ServiceGallery.is_active == True)
+    
+    images = query.order_by(ServiceGallery.sort_order, ServiceGallery.created_at).all()
+    
+    return images
+
+
+@router.put("/services/gallery/{image_id}", response_model=ServiceGalleryResponse)
+async def update_service_gallery_image(
+    image_id: uuid.UUID,
+    image_data: ServiceGalleryUpdate,
+    firebase_uid: str = Query(..., description="Firebase UID from frontend"),
+    db: Session = Depends(get_db)
+):
+    """
+    Update service gallery image details (title, description, order, etc.).
+    
+    **Purpose**: Business owners can edit image metadata, reorder gallery, set primary image.
+    
+    **Who uses it**: Business owners
+    
+    **FlutterFlow**: Edit form for each service gallery image.
+    """
+    # Get business
+    business = db.query(Business).filter(
+        Business.firebase_uid == firebase_uid
+    ).first()
+    
+    if not business:
+        raise HTTPException(status_code=404, detail="Business not found")
+    
+    # Get image and verify it belongs to a service owned by this business
+    image = db.query(ServiceGallery).join(Service).filter(
+        ServiceGallery.id == image_id,
+        Service.business_id == business.id
+    ).first()
+    
+    if not image:
+        raise HTTPException(status_code=404, detail="Service gallery image not found")
+    
+    # Update image
+    update_dict = image_data.model_dump(exclude_unset=True)
+    for key, value in update_dict.items():
+        setattr(image, key, value)
+    
+    db.commit()
+    db.refresh(image)
+    
+    return image
+
+
+@router.delete("/services/gallery/{image_id}")
+async def delete_service_gallery_image(
+    image_id: uuid.UUID,
+    firebase_uid: str = Query(..., description="Firebase UID from frontend"),
+    db: Session = Depends(get_db)
+):
+    """
+    Delete a service gallery image.
+    
+    **Purpose**: Business owners can remove photos from their service gallery.
+    
+    **Who uses it**: Business owners
+    
+    **FlutterFlow**: Delete button on each service gallery image with confirmation dialog.
+    
+    **Note**: This only deletes the database record. FlutterFlow should also delete the image from Firebase Storage.
+    """
+    # Get business
+    business = db.query(Business).filter(
+        Business.firebase_uid == firebase_uid
+    ).first()
+    
+    if not business:
+        raise HTTPException(status_code=404, detail="Business not found")
+    
+    # Get image and verify it belongs to a service owned by this business
+    image = db.query(ServiceGallery).join(Service).filter(
+        ServiceGallery.id == image_id,
+        Service.business_id == business.id
+    ).first()
+    
+    if not image:
+        raise HTTPException(status_code=404, detail="Service gallery image not found")
+    
+    db.delete(image)
+    db.commit()
+    
+    return {"message": "Service gallery image deleted successfully"}
