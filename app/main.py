@@ -60,9 +60,9 @@ app_kwargs = {
 if settings.ENVIRONMENT == "production":
     # In production with Nginx proxy at /bookora
     app_kwargs["root_path"] = "/bookora"
-    app_kwargs["openapi_url"] = "/bookora/api/v1/openapi.json"  # Full path for Swagger UI
-    app_kwargs["docs_url"] = "/bookora/docs"
-    app_kwargs["redoc_url"] = "/bookora/redoc"
+    app_kwargs["openapi_url"] = "/api/v1/openapi.json"  # Relative path, root_path will be prepended
+    app_kwargs["docs_url"] = None  # Disable default docs, we'll create custom one
+    app_kwargs["redoc_url"] = None  # Disable default redoc, we'll create custom one
     app_kwargs["servers"] = [
         {"url": "https://wiseappsdev.cloud/bookora", "description": "Production server"}
     ]
@@ -112,6 +112,28 @@ def custom_openapi():
     return app.openapi_schema
 
 app.openapi = custom_openapi
+
+# Custom Swagger UI and ReDoc endpoints for production with proper root_path handling
+if settings.ENVIRONMENT == "production":
+    from fastapi.openapi.docs import get_swagger_ui_html, get_redoc_html
+    
+    @app.get("/docs", include_in_schema=False)
+    async def custom_swagger_ui_html():
+        return get_swagger_ui_html(
+            openapi_url=app.root_path + app.openapi_url,
+            title=app.title + " - Swagger UI",
+            oauth2_redirect_url=app.swagger_ui_oauth2_redirect_url,
+            swagger_js_url="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui-bundle.js",
+            swagger_css_url="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui.css",
+        )
+    
+    @app.get("/redoc", include_in_schema=False)
+    async def redoc_html():
+        return get_redoc_html(
+            openapi_url=app.root_path + app.openapi_url,
+            title=app.title + " - ReDoc",
+            redoc_js_url="https://cdn.jsdelivr.net/npm/redoc@next/bundles/redoc.standalone.js",
+        )
 
 # CORS middleware
 app.add_middleware(
