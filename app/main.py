@@ -53,18 +53,24 @@ app_kwargs = {
     "title": "Bookora API",
     "description": "Multi-tenant appointment booking REST API for businesses and clients",
     "version": "1.0.0",
-    "openapi_url": "/api/v1/openapi.json",
-    "docs_url": "/docs",
-    "redoc_url": "/redoc",
     "lifespan": lifespan
 }
 
-# Add root_path and servers only in production
+# Configure URLs based on environment
 if settings.ENVIRONMENT == "production":
+    # In production with Nginx proxy at /bookora
     app_kwargs["root_path"] = "/bookora"
+    app_kwargs["openapi_url"] = "/bookora/api/v1/openapi.json"  # Full path for Swagger UI
+    app_kwargs["docs_url"] = "/bookora/docs"
+    app_kwargs["redoc_url"] = "/bookora/redoc"
     app_kwargs["servers"] = [
         {"url": "https://wiseappsdev.cloud/bookora", "description": "Production server"}
     ]
+else:
+    # Local development without proxy
+    app_kwargs["openapi_url"] = "/api/v1/openapi.json"
+    app_kwargs["docs_url"] = "/docs"
+    app_kwargs["redoc_url"] = "/redoc"
 
 app = FastAPI(**app_kwargs)
 
